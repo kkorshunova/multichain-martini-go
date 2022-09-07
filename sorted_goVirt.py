@@ -321,8 +321,8 @@ def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter):
                 virtual_sites.append([atomnr, line[0]])
                 vwd_excl.append([k, atomnr])  # dict: key=resnr : val=atomnr
     #print(resnr_intra)
-    #for line in upd_out_pdb:
-    #    print(line)
+    for line in upd_out_pdb:
+        print(line)
 
     # write an updated pdb file:
     with open('updated_' + file_pref + '_cg.pdb', 'w') as f:
@@ -332,7 +332,7 @@ def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter):
             f.write(s2print)
         f.write('END   ')
 
-    return vwb_excl, vwc_excl, vwd_excl, virtual_sites
+    return vwb_excl, vwc_excl, vwd_excl, virtual_sites, upd_out_pdb
 
 
 def get_exclusions(vwb_excl, vwc_excl, vwd_excl, sym_pairs_intra, sym_pairs_inter):
@@ -488,7 +488,8 @@ def get_bb_pair_sigma_epsilon(itp_filename, martini_file, sym_pairs_inter, missA
 # todo: routines same as in old version, just repeated for sym_pars_intra/inter separately
 # todo: check WHY does this function use sym_pairs_inter/intra w/o them being input params????
 def write_include_files(file_pref, missAt, indBB, missRes, Natoms, nameAA, go_eps_intra, go_eps_inter, c6c12,
-                sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs, inter_pairs, virtual_sites):
+                sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs, inter_pairs,
+                        virtual_sites, upd_out_pdb):
     # main.top -> martini_v3.0.0.itp [ nonbonded_params ]-> go-table_VirtGoSites.itp -> $MOL_go-table_VirtGoSites.itp
     with open(file_pref + '_go-table_VirtGoSites.itp', 'w') as f:
         f.write('; OV + symmetric rCSU contacts \n')
@@ -581,7 +582,21 @@ def write_include_files(file_pref, missAt, indBB, missRes, Natoms, nameAA, go_ep
     # main.top -> molecule.itp [ atoms ] -> $MOL_atoms_VirtGoSites.itp
     with open(file_pref + '_atoms_VirtGoSites.itp', 'w') as f:
         f.write('; virtual sites\n')
-        # todo: for loop that writes the list of atoms created elsewhere
+        for entry in upd_out_pdb:
+            if entry[1] == 'VWA':
+                suffix = 'A'
+            elif entry[1] == 'VWB':
+                suffix = 'B'
+            elif entry[1] == 'VWC':
+                suffix = 'C'
+            elif entry[1] == 'VWD':
+                suffix = 'D'
+            else:
+                continue
+            s2print = "%3d %s_%s%-3d %6d %3s %-3s %-5d 0.0\n" % (entry[0], file_pref, suffix, entry[3], entry[3],
+                                                               entry[2], entry[1], entry[0])
+            # atomnr atomtype=(filepref_[A-D]resnr) resnr resname atomname chrggrp=atomnr q=0.0
+            f.write(s2print)
 
     # main.top -> molecule.itp [ virtual_sitesn ] -> $MOL_virtual_sites_VirtGoSites.itp
     with open(file_pref + '_virt_sitesn_VirtGoSites.itp', 'w') as f:
@@ -649,7 +664,7 @@ def write_main_top_files(file_pref, molecule_itp):
             f.write(line)
         f.write('#include "'+file_pref+'_exclusions_VirtGoSites.itp"\n')
 
-    # write updated .top file:
+    # write updated .top file from scratch:
     with open('updated_'+file_pref+'.top', 'w') as f:
         f.write('#define GO_VIRT\n')
         f.write('#include "martini_v3.0.0.itp"\n')
@@ -657,7 +672,7 @@ def write_main_top_files(file_pref, molecule_itp):
         f.write('[ system ]\n'+ file_pref + ' complex with Go\n\n')
         f.write('[ molecules ]\n' + file_pref + '     1 \n') # check if 1 can be a variable
 
-    #todo: consistent martinize2 output:
+    # later: consistent martinize2 output:
     # with Go-flag: inserts "#include"-lines into the cg top,itps BUT adds not needed lines in pdb and molecule.itp
     # solution -> cut off end of pdb and add own lines
     # without Go-flag: need to alter cg top/itp AND pdb file
@@ -690,11 +705,11 @@ sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter = sym_pair_sort(sym_p
 
 
 # write the updated pdb file (VS A-D):
-vwb_excl, vwc_excl, vwd_excl, virtual_sites = update_pdb(args.moltype, out_pdb, resnr_intra, resnr_inter)
+vwb_excl, vwc_excl, vwd_excl, virtual_sites, upd_out_pdb = update_pdb(args.moltype, out_pdb, resnr_intra, resnr_inter)
 excl_b, excl_c, excl_d, intra_pairs, inter_pairs = get_exclusions(vwb_excl, vwc_excl, vwd_excl, sym_pairs_intra,
                                                                   sym_pairs_inter)
 # write the updated itp/top files:
 write_include_files(args.moltype, missAt, indBB, args.missres, args.Natoms, nameAA, args.go_eps_intra,
                     args.go_eps_inter, c6c12, sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs,
-                    inter_pairs, virtual_sites)
+                    inter_pairs, virtual_sites, upd_out_pdb)
 write_main_top_files(args.moltype, 'test_insulin.itp')

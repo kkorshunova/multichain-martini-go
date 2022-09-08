@@ -28,6 +28,8 @@ def user_input():
                         help='Number of coarse-grained beads in the protein excluding the virtual Go beads.')
     parser.add_argument('--missres', type=int, default=0,
                         help='Number of missing residues at the beginning of the atomistic pdb structure which is needed if the numbering of the coarse-grained structure starts at 1 (default: 0).')
+    parser.add_argument('--bb_cutoff', type=int, default=10,
+                        help='Max distance (in A) allowed between next-neighbor BBs (default: 10 A).')
     args = parser.parse_args()
     return args
 
@@ -35,7 +37,6 @@ def user_input():
 # get_settings() initializes temporary file names and some vars
 def get_settings():
     # names for temporary files: - todo: delete after end of script run
-    file_BB = 'BB.pdb'
     file_OV = 'OV.map'
     file_rCSU = 'rCSU.map'
 
@@ -46,53 +47,40 @@ def get_settings():
     missAt = 0          # todo: is this used? number of missing atoms at the beginning of pdb structure
                         # (this has to result in the correct atom number when added to "k_at" compared to the .itp file)
     c6c12 = 0           # if set to 1, the C6 and C12 term are expected in the .itp file; if set to 0, sigma and go_eps are used
-    return file_BB, file_OV, file_rCSU, header_lines, seqDist, cols, missAt, c6c12
+    return file_OV, file_rCSU, header_lines, seqDist, cols, missAt, c6c12
 
 
 # read_data() parses data from the .map file (output of the rCSU server), stores it in temporary files
 # returns lists: indBB (list of xyz coords of BB), nameAA (resname list), map_OVrCSU (list: resID resID distance...)
 # todo: get rid of subprocess calling if possible
-# todo: incorporate the read_pdb() routine into this function (produce BB.pdb for all uses)
-def read_data(struct_pdb, file_contacts, file_BB, file_OV, file_rCSU, header_lines, cols):
+def read_data(cg_pdb, file_contacts, file_OV, file_rCSU, header_lines, cols):
     # preparation of temporary files for reading
     subprocess.call("grep '1 [01] [01] [01]' " + file_contacts + " > " + file_OV, shell=True)
     subprocess.call("echo '' >> " + file_OV, shell=True)
     subprocess.call("grep '0 [01] [01] 1' " + file_contacts + " > " + file_rCSU, shell=True)
     subprocess.call("echo '' >> " + file_rCSU, shell=True)
-    # read_pdb() starts here
-    subprocess.call("grep 'BB' " + struct_pdb + " > " + file_BB, shell=True)
-    subprocess.call("echo '' >> " + file_BB, shell=True)
 
-    # read coarse-grained BB bead positions
-    with open(file_BB,'r') as fid:
-        dat = fid.readlines()
-    dat = dat[header_lines:-1]
-    #print('Number of coarse-grained BB beads in your protein: ' + str(len(dat)))
-
-    indBB = []
-    nameAA = []
-    for k in range(0, len(dat)):  # reads pdb file - const format allows precise character position definition
-        tmp = dat[k]
-        tmp = [ tmp[0:6],         # 0  record type (ATOM)
-                tmp[6:11],        # 1  ! atom serial number -> indBB
-                tmp[12:16],       # 2  atom name
-                tmp[16],          # 3  alternate location indicator (?)
-                tmp[17:20],       # 4  ! residue name -> nameAA
-                tmp[21],          # 5  chain ID
-                tmp[22:26],       # 6  residue number
-                tmp[26],          # 7  code for insertions of residues (?)
-                tmp[30:38],       # 8  ! x coord -> indBB
-                tmp[38:46],       # 9  ! y coord -> indBB
-                tmp[46:54],       # 10 ! z coord -> indBB
-                tmp[54:60],       # 11 occupancy
-                tmp[60:66],       # 12 T factor
-                tmp[76:78],       # 13 element symbol (?)
-                tmp[78:80],       # 14 charge
-                ]
-        indBB.append([ int(tmp[1]), float(tmp[8]), float(tmp[9]), float(tmp[10]) ])
-        nameAA.append(tmp[4])
+    # read the pdb file
+    pdb_data = [ ]
+    indBB = [ ]  # separate from pdb_data[] because indBB needs to be a numpy array
+    with open(cg_pdb, 'r') as file:
+        # create a 2d array with all relevant data: pdb_data columns 1-3,5-8
+        #    here: omitted chain_id (column 4)
+        for line in file:
+            line = line.split()
+            if line[0] == 'ATOM' and line[2] != 'CA':  # double check we are using only the relevant pdb records
+                # later: more flexible ways to filter out unnecessary VSs written by martinize?
+                # save only relevant columns in pdb_data + add column for chain id:
+                pdb_data.append(
+                    [int(line[1]), line[2], line[3], int(line[5]), float(line[6]), float(line[7]), float(line[8]), 0])
+                #      atomnr     atomname   resname      resnr      x         y         z       chain_id
+                #  e.g.: [1, 'BB', 'GLY', 1, -26.214, 5.188, -11.96, 0]
+                if line[2] == 'BB':
+                    indBB.append([int(line[1]), float(line[6]), float(line[7]), float(line[8])])
+                    # indBB:           atomnr           x              y              z
+            else:
+                continue  # skips irrelevant lines (e.g. CONECT if it's present in file)
     indBB = np.array(indBB)
-    # read_pdb() ends here
 
     # read OV contact map
     with open(file_OV,'r') as fid:
@@ -126,7 +114,7 @@ def read_data(struct_pdb, file_contacts, file_BB, file_OV, file_rCSU, header_lin
         map_OVrCSU.append(row)
         row = []
 
-    return indBB, nameAA, map_OVrCSU
+    return indBB, map_OVrCSU, pdb_data
 
 
 # get_go() calculates and filters the Go pairs according to requirements (AT server map data -> CG structure)
@@ -170,32 +158,11 @@ def get_go(indBB, map_OVrCSU, cutoff_short, cutoff_long, go_eps_intra, seqDist, 
     return sym_pairs
 
 ########## INTRA-INTER SORTING PROCEDURES ##########
-# todo: unite this pdb reading procedure with read_data()
-def read_pdb(filepath):
-    # function that reads the pdb file and saves atomnr, atomname, resname, resnr, x, y, z, chain_id
-    # appended new column at the end: new chain identifier (int)
-    pdb_data = []
-    # todo: check for correct file, raise an error if not pdb
-    with open(filepath, 'r') as file:
-        # create a 2d array with all relevant data: pdb_data columns 1-3,5-8
-        #    here: omitted chain_id (column 4)
-        for line in file:
-            line = line.split()
-            if line[0] == 'ATOM' and line[2] != 'CA':  # double check we are using only the relevant pdb records
-                # later: more flexible ways to filter out unnecessary VSs written by martinize?
-                # save only relevant columns in pdb_data + add column for chain id:
-                pdb_data.append([int(line[1]), line[2], line[3], int(line[5]), float(line[6]), float(line[7]), float(line[8]), 0])
-                #  pdb_data:         atomnr   atomname   resname      resnr      x         y         z       chain_id
-                #  e.g.: [1, 'BB', 'GLY', 1, -26.214, 5.188, -11.96, 0]
-            else:
-                continue  # skips irrelevant lines (e.g. CONECT if it's present in file)
-
-    return pdb_data
-
-
 # create a new 2d list: pdb_data + last column with chain IDs
 # out_pdb can be used to analyze and sort inter/intra bonds by checking the resnr + chain ID combo of the VSite
-def assign_chain_ids(pdb_data):
+def assign_chain_ids(pdb_data, bb_cutoff):
+    # set the cutoff distance
+    max_dist = pow(bb_cutoff, 2)  # (squared, A) distance between two consecutive residues in backbone
     ######## find chain "heads"
     # compute squared distances between sequential BBs
     # input: system_pdb_data (2d list), output: new_chain_begins (1d list)
@@ -494,7 +461,7 @@ def get_bb_pair_sigma_epsilon(itp_filename, martini_file, sym_pairs_inter, missA
 ########## FILE WRITING PROCEDURES ##########
 # todo: routines same as in old version, just repeated for sym_pars_intra/inter separately
 # todo: check WHY does this function use sym_pairs_inter/intra w/o them being input params????
-def write_include_files(file_pref, missAt, indBB, missRes, Natoms, nameAA, go_eps_intra, go_eps_inter, c6c12,
+def write_include_files(file_pref, missAt, indBB, missRes, Natoms, go_eps_intra, go_eps_inter, c6c12,
                 sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs, inter_pairs,
                         virtual_sites, upd_out_pdb):
     # main.top -> martini_v3.0.0.itp [ nonbonded_params ]-> go-table_VirtGoSites.itp -> $MOL_go-table_VirtGoSites.itp
@@ -689,23 +656,17 @@ def write_main_top_files(file_pref, molecule_itp):
 # parse input arguments, initialize some vars:
 args = user_input()
 # write temp files, initialize more vars:
-file_BB, file_OV, file_rCSU, header_lines, seqDist, cols, missAt, c6c12 = get_settings()
+file_OV, file_rCSU, header_lines, seqDist, cols, missAt, c6c12 = get_settings()
 # read contact map data and store it in lists:
-indBB, nameAA, map_OVrCSU = read_data(args.s, args.f, file_BB, file_OV, file_rCSU, header_lines, cols)
+indBB, map_OVrCSU, system_pdb_data = read_data(args.s, args.f, file_OV, file_rCSU, header_lines, cols)
 # write symmetric unsorted Go pairs
 sym_pairs = get_go(indBB, map_OVrCSU, args.cutoff_short, args.cutoff_long, args.go_eps_intra, seqDist, args.missres)
 
-
 # sort Go pairs into intra and inter sub-lists:
-# set the cutoff distance
-# todo: user-adjustable, 100 as default
-max_dist = 100  # (squared, A) distance between two consecutive residues in backbone
-# open input pdb (post-martinize3 with -go-vs)
-system_pdb_data = read_pdb('insulin_cg.pdb')
-# find indices (atomnr) of first BBs in each chain
-out_pdb = assign_chain_ids(system_pdb_data)
+out_pdb = assign_chain_ids(system_pdb_data, args.bb_cutoff)
+# group sym_pairs into intra and inter based on their chain IDs
 sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter = sym_pair_sort(sym_pairs, out_pdb)
-# todo: fix parameters (itp filename) here:
+# todo: this entire function
 #atoms_section, bb_atomtype_pairs = get_bb_pair_sigma_epsilon('insulin.itp', 'martini_v3.0.0.itp', sym_pairs_inter, missAt)
 
 
@@ -714,7 +675,7 @@ vwb_excl, vwc_excl, vwd_excl, virtual_sites, upd_out_pdb = update_pdb(args.molty
 excl_b, excl_c, excl_d, intra_pairs, inter_pairs = get_exclusions(vwb_excl, vwc_excl, vwd_excl, sym_pairs_intra,
                                                                   sym_pairs_inter)
 # write the updated itp/top files:
-write_include_files(args.moltype, missAt, indBB, args.missres, args.Natoms, nameAA, args.go_eps_intra,
+write_include_files(args.moltype, missAt, indBB, args.missres, args.Natoms, args.go_eps_intra,
                     args.go_eps_inter, c6c12, sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs,
                     inter_pairs, virtual_sites, upd_out_pdb)
 write_main_top_files(args.moltype, args.i)

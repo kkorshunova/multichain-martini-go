@@ -14,8 +14,8 @@ def user_input():
     parser.add_argument('-s', help='File containing the coarse-grained structure of the protein in pdb format.')
     parser.add_argument('-f', help='File containing the contact analysis of the (atomistic) protein structure obtained from the webserver http://info.ifpan.edu.pl/~rcsu/rcsu/index.html.')
     parser.add_argument('-i', help='File containing the topology of coarse-grained protein in itp format.')
-    parser.add_argument('--moltype', default='molecule_0',
-                        help='Molecule name used as prefix in your output file names and the virtual bead names (default: molecule_0). If you will combine your Go-like model with a coarse-grained protein generated with martinize2, you must use the same name as specified with the --govs-moltype flag of martinize2!')
+    parser.add_argument('--moltype', default='mol',
+                        help='Molecule name used as prefix in your output file names and the virtual bead names (default: mol). If you will combine your Go-like model with a coarse-grained protein generated with martinize2, you must use the same name as specified with the --govs-moltype flag of martinize2!')
     parser.add_argument('--go_eps_inter', type=float, default=9.414,
                         help='Dissociation energy [kJ/mol] of the Lennard-Jones potential used in the Go-like model (default: 9.414).')
     parser.add_argument('--go_eps_intra', type=float, default=9.414,
@@ -47,7 +47,15 @@ def get_settings():
     missAt = 0          # todo: is this used? number of missing atoms at the beginning of pdb structure
                         # (this has to result in the correct atom number when added to "k_at" compared to the .itp file)
     c6c12 = 0           # if set to 1, the C6 and C12 term are expected in the .itp file; if set to 0, sigma and go_eps are used
-    return file_OV, file_rCSU, header_lines, seqDist, cols, missAt, c6c12
+
+    # names of the output included itp files:
+    fnames = ['atomtypes_go.itp',
+              'nonbond_params_go.itp',
+              'atoms_go.itp',
+              'virtual_sitesn_go.itp',
+              'exclusions_go.itp']
+
+    return file_OV, file_rCSU, header_lines, seqDist, cols, missAt, c6c12, fnames
 
 
 # read_data() parses data from the .map file (output of the rCSU server), stores it in temporary files
@@ -464,8 +472,35 @@ def get_bb_pair_sigma_epsilon(itp_filename, martini_file, sym_pairs_inter, missA
 def write_include_files(file_pref, missAt, indBB, missRes, Natoms, go_eps_intra, go_eps_inter, c6c12,
                 sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs, inter_pairs,
                         virtual_sites, upd_out_pdb):
-    # main.top -> martini_v3.0.0.itp [ nonbonded_params ]-> go-table_VirtGoSites.itp -> $MOL_go-table_VirtGoSites.itp
-    with open(file_pref + '_go-table_VirtGoSites.itp', 'w') as f:
+    # main.top -> martini_v3.0.0_go.itp [ atomtypes ]-> atomtypes_go.itp -> (file_pref)_atomtypes_go.itp
+    # here: sets of (file_pref)_[A-D] VSites
+    with open(file_pref + '_' + fnames[0], 'w') as f:
+        f.write('; protein BB virtual particles \n')
+        f.write('; INTRA particles\n')
+        for k in resnr_intra:
+            s2print = '%s_A%s 0.0 0.000 A 0.0 0.0 \n' % (
+            file_pref, str(k + missRes))  # residue index adapted due to missing residues
+            f.write(s2print)
+        for k in resnr_intra:
+            s2print = '%s_B%s 0.0 0.000 A 0.0 0.0 \n' % (
+                file_pref, str(k + missRes))  # residue index adapted due to missing residues
+            f.write(s2print)
+        f.write('; INTER particles\n')
+        for j in resnr_inter:
+            s2print = '%s_C%s 0.0 0.000 A 0.0 0.0 \n' % (
+                file_pref, str(j + missRes))  # residue index adapted due to missing residues
+            f.write(s2print)
+        for j in resnr_inter:
+            s2print = '%s_D%s 0.0 0.000 A 0.0 0.0 \n' % (
+                file_pref, str(j + missRes))  # residue index adapted due to missing residues
+            f.write(s2print)
+    # add the name of the created .itp file into the wrapper atomtypes_go.itp
+    with open(fnames[0], 'w') as f:
+        s2print = '#include "%s_%s"\n' % (file_pref, fnames[0])
+        f.write(s2print)
+
+    # main.top -> martini_v3.0.0_go.itp [ nonbond_params ]-> nonbond_params_go.itp -> (file_pref)_nonbond_params.itp
+    with open(file_pref + '_' + fnames[1], 'w') as f:
         f.write('; OV + symmetric rCSU contacts \n')
         if (c6c12 == 1):  # this setting uses sigma/eps computed using Vii, Wii
             f.write('; not implemented yet\n')
@@ -473,23 +508,23 @@ def write_include_files(file_pref, missAt, indBB, missRes, Natoms, go_eps_intra,
             f.write('; INTRA section: A-B pairs (+/- go_eps_intra) \n')
             for k in range(0, len(sym_pairs_intra)):
                 # VWA-VWA pair: BB go_eps_intra
-                s2print = " %s_A%s  %s_A%s    1  %.10f  %.10f  ;  %s  %s  %.3f \n" % (file_pref,
-                                                                                    str(int(sym_pairs_intra[k][4])),
-                                                                                    file_pref,
-                                                                                    str(int(sym_pairs_intra[k][5])),
-                                                                                    sym_pairs_intra[k][7],
-                                                                                    go_eps_intra,
-                                                                                    str(int(sym_pairs_intra[k][0]) +missAt),
-                                                                                    str(int(sym_pairs_intra[k][1]) +missAt),
-                                                                                    sym_pairs_intra[k][6])
-                f.write(s2print)
-                # VWB-VWB pair: BB -go_eps_intra
-                s2print = " %s_B%s  %s_B%s    1  %.10f  %.10f  ;  %s  %s  %.3f \n" % (file_pref,
+                s2print = ' %s_A%s  %s_A%s    1  %.10f  %.10f  ;  %s  %s  %.3f \n' % (file_pref,
                                                                                       str(int(sym_pairs_intra[k][4])),
                                                                                       file_pref,
                                                                                       str(int(sym_pairs_intra[k][5])),
                                                                                       sym_pairs_intra[k][7],
-                                                                                      -go_eps_intra+0.00001, # avoid exact val
+                                                                                      go_eps_intra,
+                                                                                      str(int(sym_pairs_intra[k][0]) +missAt),
+                                                                                      str(int(sym_pairs_intra[k][1]) +missAt),
+                                                                                      sym_pairs_intra[k][6])
+                f.write(s2print)
+                # VWB-VWB pair: BB -go_eps_intra
+                s2print = ' %s_B%s  %s_B%s    1  %.10f  %.10f  ;  %s  %s  %.3f \n' % (file_pref,
+                                                                                      str(int(sym_pairs_intra[k][4])),
+                                                                                      file_pref,
+                                                                                      str(int(sym_pairs_intra[k][5])),
+                                                                                      sym_pairs_intra[k][7],
+                                                                                      -go_eps_intra + 0.00001,  # avoid exact val
                                                                                       str(int(sym_pairs_intra[k][
                                                                                                   0]) + missAt),
                                                                                       str(int(sym_pairs_intra[k][
@@ -498,63 +533,36 @@ def write_include_files(file_pref, missAt, indBB, missRes, Natoms, go_eps_intra,
                 f.write(s2print)
             f.write('; INTER section: C (go_eps_inter) \n')
             for k in range(0, len(sym_pairs_inter)):
-                s2print = " %s_C%s  %s_C%s    1  %.10f  %.10f  ;  %s  %s  %.3f \n" % (file_pref,
-                                                                                    str(int(sym_pairs_inter[k][4])),
-                                                                                    file_pref,
-                                                                                    str(int(sym_pairs_inter[k][5])),
-                                                                                    sym_pairs_inter[k][7],
-                                                                                    go_eps_inter,
-                                                                                    str(int(sym_pairs_inter[k][0]) +missAt),
-                                                                                    str(int(sym_pairs_inter[k][1]) +missAt),
-                                                                                    sym_pairs_inter[k][6])
+                s2print = ' %s_C%s  %s_C%s    1  %.10f  %.10f  ;  %s  %s  %.3f \n' % (file_pref,
+                                                                                      str(int(sym_pairs_inter[k][4])),
+                                                                                      file_pref,
+                                                                                      str(int(sym_pairs_inter[k][5])),
+                                                                                      sym_pairs_inter[k][7],
+                                                                                      go_eps_inter,
+                                                                                      str(int(sym_pairs_inter[k][0]) +missAt),
+                                                                                      str(int(sym_pairs_inter[k][1]) +missAt),
+                                                                                      sym_pairs_inter[k][6])
                 f.write(s2print)
             f.write('; INTER section: D (-go_eps_BB) \n')
             for k in range(0, len(sym_pairs_inter)):
                 # todo: replace sym_pairs_inter[k][7] and go_eps_inter  with BB sigma/eps values
-                s2print = " %s_D%s  %s_D%s    1  %.10f  %.10f  ;  %s  %s  %.3f \n" % (file_pref,
-                                                                                    str(int(sym_pairs_inter[k][4])),
-                                                                                    file_pref,
-                                                                                    str(int(sym_pairs_inter[k][5])),
-                                                                                    sym_pairs_inter[k][7],
-                                                                                    -go_eps_inter+0.00001, # avoid exact val
-                                                                                    str(int(sym_pairs_inter[k][0]) +missAt),
-                                                                                    str(int(sym_pairs_inter[k][1]) +missAt),
-                                                                                    sym_pairs_inter[k][6])
+                s2print = ' %s_D%s  %s_D%s    1  %.10f  %.10f  ;  %s  %s  %.3f \n' % (file_pref,
+                                                                                      str(int(sym_pairs_inter[k][4])),
+                                                                                      file_pref,
+                                                                                      str(int(sym_pairs_inter[k][5])),
+                                                                                      sym_pairs_inter[k][7],
+                                                                                      -go_eps_inter + 0.00001,  # avoid exact val
+                                                                                      str(int(sym_pairs_inter[k][0]) +missAt),
+                                                                                      str(int(sym_pairs_inter[k][1]) +missAt),
+                                                                                      sym_pairs_inter[k][6])
                 f.write(s2print)
     # add the name of the created .itp file into the wrapper go-table_VirtGoSites.itp
-    with open('go-table_VirtGoSites.itp','w') as f:
-        s2print = "#include \"%s_go-table_VirtGoSites.itp\"\n" % file_pref
+    with open(fnames[1],'w') as f:  # this itp name file was written by martinize2
+        s2print = '#include "%s_%s"\n' % (file_pref, fnames[1])
         f.write(s2print)
 
-    # main.top -> martini_v3.0.0.itp [ atomtypes ]-> BB-part-def_VirtGoSites.itp -> $MOL_BB-part-def_VirtGoSites.itp
-    # here: sets of $MOL_[A-D] VSites
-    with open(file_pref + '_BB-part-def_VirtGoSites.itp', 'w') as f:
-        f.write('; protein BB virtual particles \n')
-        f.write('; INTRA particles\n')
-        for k in resnr_intra:
-            s2print = "%s_A%s 0.0 0.000 A 0.0 0.0 \n" % (
-            file_pref, str(k + missRes))  # residue index adapted due to missing residues
-            f.write(s2print)
-        for k in resnr_intra:
-            s2print = "%s_B%s 0.0 0.000 A 0.0 0.0 \n" % (
-                file_pref, str(k + missRes))  # residue index adapted due to missing residues
-            f.write(s2print)
-        f.write('; INTER particles\n')
-        for j in resnr_inter:
-            s2print = "%s_C%s 0.0 0.000 A 0.0 0.0 \n" % (
-                file_pref, str(j + missRes))  # residue index adapted due to missing residues
-            f.write(s2print)
-        for j in resnr_inter:
-            s2print = "%s_D%s 0.0 0.000 A 0.0 0.0 \n" % (
-                file_pref, str(j + missRes))  # residue index adapted due to missing residues
-            f.write(s2print)
-    # add the name of the created .itp file into the wrapper go-table_VirtGoSites.itp
-    with open('BB-part-def_VirtGoSites.itp', 'w') as f:
-        s2print = "#include \"%s_BB-part-def_VirtGoSites.itp\"\n" % file_pref
-        f.write(s2print)
-
-    # main.top -> molecule.itp [ atoms ] -> $MOL_atoms_VirtGoSites.itp
-    with open(file_pref + '_atoms_VirtGoSites.itp', 'w') as f:
+    # main.top -> (file_pref)_go.itp [ atoms ] -> (file_pref)_atoms_go.itp
+    with open(file_pref + '_' + fnames[2], 'w') as f:
         f.write('; virtual sites\n')
         for entry in upd_out_pdb:
             if entry[1] == 'VWA':
@@ -567,29 +575,29 @@ def write_include_files(file_pref, missAt, indBB, missRes, Natoms, go_eps_intra,
                 suffix = 'D'
             else:
                 continue
-            s2print = "%3d %s_%s%-3d %6d %3s %-3s %-5d 0.0\n" % (entry[0], file_pref, suffix, entry[3], entry[3],
-                                                               entry[2], entry[1], entry[0])
+            s2print = '%3d %s_%s%-3d %6d %3s %-3s %-5d 0.0\n' % (entry[0], file_pref, suffix, entry[3], entry[3],
+                                                                 entry[2], entry[1], entry[0])
             # atomnr atomtype=(filepref_[A-D]resnr) resnr resname atomname chrggrp=atomnr q=0.0
             f.write(s2print)
 
-    # main.top -> molecule.itp [ virtual_sitesn ] -> $MOL_virtual_sites_VirtGoSites.itp
-    with open(file_pref + '_virt_sitesn_VirtGoSites.itp', 'w') as f:
+    # main.top -> molecule.itp [ virtual_sitesn ] -> (file_pref)_virtual_sitesn_go.itp
+    with open(file_pref + '_' + fnames[3], 'w') as f:
         f.write('; VS index - funct - constructing atom index/indices\n')
         for pair in virtual_sites:
-            s2print = "%4d 1 %3d\n" % (pair[0], pair[1])
+            s2print = '%4d 1 %3d\n' % (pair[0], pair[1])
             f.write(s2print)
 
-    # main.top -> molecule.itp [ exclusions ] -> $MOL_exclusions_VirtGoSites.itp
+    # main.top -> molecule.itp [ exclusions ] -> (file_pref)_exclusions_go.itp
     # exclusion pairs sorted by intra-inter:
-    with open(file_pref + '_exclusions_VirtGoSites.itp', 'w') as f:
+    with open(file_pref + '_' + fnames[4], 'w') as f:
         f.write('; [ exclusions for intra BB sites ]\n')
         f.write('; atomnr atomnr  -  resnr resnr\n')
         for line in sym_pairs_intra:
-            s2print = " %d  %d  \t ;  %d  %d \n" % (line[0], line[1], line[4], line[5])
+            s2print = ' %d  %d  \t ;  %d  %d \n' % (line[0], line[1], line[4], line[5])
             f.write(s2print)
         f.write('; [ exclusions for intra VWB sites ]\n')
         for ind in range(len(excl_b)):
-            s2print = " %d  %d  \t ;  %d  %d \n" % (excl_b[ind][0], excl_b[ind][1],
+            s2print = ' %d  %d  \t ;  %d  %d \n' % (excl_b[ind][0], excl_b[ind][1],
                                                     intra_pairs[ind][0], intra_pairs[ind][1])
             f.write(s2print)
         f.write('; [ exclusions for inter VWC sites ]\n')
@@ -599,7 +607,7 @@ def write_include_files(file_pref, missAt, indBB, missRes, Natoms, go_eps_intra,
             f.write(s2print)
         f.write('; [ exclusions for inter VWD sites ]\n')
         for ind in range(len(excl_d)):
-            s2print = " %d  %d  \t ;  %d  %d \n" % (excl_d[ind][0], excl_d[ind][1],
+            s2print = ' %d  %d  \t ;  %d  %d \n' % (excl_d[ind][0], excl_d[ind][1],
                                                     inter_pairs[ind][0], inter_pairs[ind][1])
             f.write(s2print)
 
@@ -607,7 +615,7 @@ def write_include_files(file_pref, missAt, indBB, missRes, Natoms, go_eps_intra,
 
 
 # modifies the .top and .itp written by martinize2 (w/o -go-vs flag), inserts "#include" lines
-def write_main_top_files(file_pref, molecule_itp):
+def write_main_top_files(file_pref, molecule_itp, fnames):
     # store the entire molecule.itp as a list (1d, 1 element = 1 line as str)
     input_itp = [ ]
     with open(molecule_itp, 'r') as f:
@@ -626,37 +634,32 @@ def write_main_top_files(file_pref, molecule_itp):
         del block_3[-1]
 
     # insert needed lines between blocks and save the new itp file:
-    with open('updated_'+molecule_itp, 'w') as f:
+    with open(file_pref + '_go.itp', 'w') as f:
         for line in block_1:
             f.write(line)
-        f.write('#include "'+file_pref+'_atoms_VirtGoSites.itp"\n\n')  # this can also be a line-for-line list
+        f.write('#include "' + file_pref + '_' + fnames[2] + '"\n\n')  # [ atoms ]
         for line in block_2:
             f.write(line)
-        f.write('\n[ virtual_sitesn ]\n#include "'+file_pref+'_virt_sitesn_VirtGoSites.itp"\n\n')
+        f.write('\n[ virtual_sitesn ]\n#include "' + file_pref + '_' + fnames[3] + '"\n\n')  # [ virtual_sitesn ]
         for line in block_3:
             f.write(line)
-        f.write('#include "'+file_pref+'_exclusions_VirtGoSites.itp"\n')
+        f.write('#include "' + file_pref + '_' + fnames[4] + '"\n')  # [ exclusions ]
 
     # write updated .top file from scratch:
-    with open('updated_'+file_pref+'.top', 'w') as f:
+    with open(file_pref+'_go.top', 'w') as f:
         f.write('#define GO_VIRT\n')
-        f.write('#include "martini_v3.0.0.itp"\n')
-        f.write('#include "updated_'+molecule_itp+'"\n\n')  # todo: check for name consistency after cleanup
-        f.write('[ system ]\n'+ file_pref + ' complex with Go\n\n')
+        f.write('#include "martini_v3.0.0_go.itp"\n')
+        f.write('#include "' + file_pref + '_go.itp"\n\n')
+        f.write('[ system ]\n'+ file_pref + ' complex with Go bonds\n\n')
         f.write('[ molecules ]\n' + file_pref + '     1 \n') # check if 1 can be a variable
 
-    # later: consistent martinize2 output:
-    # with Go-flag: inserts "#include"-lines into the cg top,itps BUT adds not needed lines in pdb and molecule.itp
-    # solution -> cut off end of pdb and add own lines
-    # without Go-flag: need to alter cg top/itp AND pdb file
-    # for now: no Go-flag + pre-created martini_v3.0.0.itp with wrappers included already
 
 
 ##################### MAIN #####################
 # parse input arguments, initialize some vars:
 args = user_input()
 # write temp files, initialize more vars:
-file_OV, file_rCSU, header_lines, seqDist, cols, missAt, c6c12 = get_settings()
+file_OV, file_rCSU, header_lines, seqDist, cols, missAt, c6c12, fnames = get_settings()
 # read contact map data and store it in lists:
 indBB, map_OVrCSU, system_pdb_data = read_data(args.s, args.f, file_OV, file_rCSU, header_lines, cols)
 # write symmetric unsorted Go pairs
@@ -678,4 +681,4 @@ excl_b, excl_c, excl_d, intra_pairs, inter_pairs = get_exclusions(vwb_excl, vwc_
 write_include_files(args.moltype, missAt, indBB, args.missres, args.Natoms, args.go_eps_intra,
                     args.go_eps_inter, c6c12, sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs,
                     inter_pairs, virtual_sites, upd_out_pdb)
-write_main_top_files(args.moltype, args.i)
+write_main_top_files(args.moltype, args.i, fnames)

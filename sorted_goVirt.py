@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import argparse
-import subprocess
 import numpy as np
 import math
 import re
@@ -34,16 +33,10 @@ def user_input():
     return args
 
 
-# get_settings() initializes temporary file names and some vars
+# get_settings() initializes "global" vars (names of output files, some numerical values)
 def get_settings():
-    # names for temporary files: - todo: delete after end of script run
-    file_OV = 'OV.map'
-    file_rCSU = 'rCSU.map'
-
-    # some other rudimentary variables
-    header_lines = 0
+    # some variables
     seqDist = 4         # minimal distance in the sequence to add a elastic bond (ElNedyn=3 [Perriole2009]; Go=4 [Poma2017])
-    cols = [5, 9, 10]   # colums of interest in the OV and rCSU contact map file
     missAt = 0          # todo: is this used? number of missing atoms at the beginning of pdb structure
                         # (this has to result in the correct atom number when added to "k_at" compared to the .itp file)
     c6c12 = 0           # if set to 1, the C6 and C12 term are expected in the .itp file; if set to 0, sigma and go_eps are used
@@ -55,19 +48,12 @@ def get_settings():
               'virtual_sitesn_go.itp',
               'exclusions_go.itp']
 
-    return file_OV, file_rCSU, header_lines, seqDist, cols, missAt, c6c12, fnames
+    return seqDist, missAt, c6c12, fnames
 
 
 # read_data() parses data from the .map file (output of the rCSU server), stores it in temporary files
-# returns lists: indBB (list of xyz coords of BB), nameAA (resname list), map_OVrCSU (list: resID resID distance...)
-# todo: get rid of subprocess calling if possible
-def read_data(cg_pdb, file_contacts, file_OV, file_rCSU, header_lines, cols):
-    # preparation of temporary files for reading
-    subprocess.call("grep '1 [01] [01] [01]' " + file_contacts + " > " + file_OV, shell=True)
-    subprocess.call("echo '' >> " + file_OV, shell=True)
-    subprocess.call("grep '0 [01] [01] 1' " + file_contacts + " > " + file_rCSU, shell=True)
-    subprocess.call("echo '' >> " + file_rCSU, shell=True)
-
+# returns lists: indBB (list of xyz coords of BB), map_OVrCSU (list: resID resID distance...), pdb_data
+def read_data(cg_pdb, file_contacts):
     # read the pdb file
     pdb_data = [ ]
     indBB = [ ]  # separate from pdb_data[] because indBB needs to be a numpy array
@@ -90,37 +76,27 @@ def read_data(cg_pdb, file_contacts, file_OV, file_rCSU, header_lines, cols):
                 continue  # skips irrelevant lines (e.g. CONECT if it's present in file)
     indBB = np.array(indBB)
 
-    # read OV contact map
-    with open(file_OV,'r') as fid:
-        dat = fid.readlines()
-    dat = dat[header_lines:-1]
-    #print('Number of contacts read from your OV contact map file: ' + str(len(dat)))
-
-    map_OVrCSU = []
-    row = []
-    for k in range(0, len(dat)):
-        tmp = dat[k]
-        tmp = tmp.replace('\t',' ')
-        tmp = tmp.split()
-        for l in cols:
-            row.append(float(tmp[l]))
-        map_OVrCSU.append(row)
-        row = []
-
-    # read rCSU contact map
-    with open(file_rCSU,'r') as fid:
-        dat = fid.readlines()
-    dat = dat[header_lines:-1]
-    #print('Number of contacts read from your rCSU contact map file: ' + str(len(dat)))
-
-    for k in range(0, len(dat)):
-        tmp = dat[k]
-        tmp = tmp.replace('\t',' ')
-        tmp = tmp.split()
-        for l in cols:
-            row.append(float(tmp[l]))
-        map_OVrCSU.append(row)
-        row = []
+    # read the map file
+    map_OVrCSU = [] # instead of shell calls (og ver)
+    with open(file_contacts, 'r') as f:
+        for line in f:
+            if re.search(r'1 [01] [01] [01]', line):
+                line = line.split()
+                if len(line) < 19:  # check for header lines (instead of 'header_lines = 0')
+                    continue
+                else:
+                    map_OVrCSU.append(
+                        [float(line[5]), float(line[9]), float(line[10])])  # instead of 'cols = [5, 9, 10]'
+    # read the file again so that OV and rCSU blocks are separated, not mixed in map_OVrCSU[ ]
+    with open(file_contacts, 'r') as f:
+        for line in f:
+            if re.search(r'0 [01] [01] 1', line):
+                line = line.split()
+                if len(line) < 19:  # check for header lines (instead of 'header_lines = 0')
+                    continue
+                else:
+                    map_OVrCSU.append(
+                        [float(line[5]), float(line[9]), float(line[10])])  # instead of 'cols = [5, 9, 10]'
 
     return indBB, map_OVrCSU, pdb_data
 
@@ -137,7 +113,8 @@ def get_go(indBB, map_OVrCSU, cutoff_short, cutoff_long, go_eps_intra, seqDist, 
 
     pairs = []
     for k in range(0, len(map_OVrCSU)):
-        if (map_OVrCSU[k][2] > cutoff_short) and (map_OVrCSU[k][2] < cutoff_long) and ( abs(map_OVrCSU[k][1]-map_OVrCSU[k][0]) >= seqDist ):
+        if (map_OVrCSU[k][2] > cutoff_short) and (map_OVrCSU[k][2] < cutoff_long) \
+                and ( abs(map_OVrCSU[k][1]-map_OVrCSU[k][0]) >= seqDist ):
             # parameters for LJ potential
             sigma = map_OVrCSU[k][2] / 1.12246204830        # calc sigma for the LJ potential in [nm]
             Vii = 4.0 * pow(sigma,6) * go_eps_intra
@@ -160,9 +137,6 @@ def get_go(indBB, map_OVrCSU, cutoff_short, cutoff_long, go_eps_intra, seqDist, 
                 if (pairs[l][0] == pairs[k][1]) and (pairs[l][1] == pairs[k][0]):
                     sym_pairs.append(pairs[k])
 
-    #for line in sym_pairs:
-    #    print(line)
-    #print(len(sym_pairs))
     return sym_pairs
 
 ########## INTRA-INTER SORTING PROCEDURES ##########
@@ -659,9 +633,9 @@ def write_main_top_files(file_pref, molecule_itp, fnames):
 # parse input arguments, initialize some vars:
 args = user_input()
 # write temp files, initialize more vars:
-file_OV, file_rCSU, header_lines, seqDist, cols, missAt, c6c12, fnames = get_settings()
+seqDist, missAt, c6c12, fnames = get_settings()
 # read contact map data and store it in lists:
-indBB, map_OVrCSU, system_pdb_data = read_data(args.s, args.f, file_OV, file_rCSU, header_lines, cols)
+indBB, map_OVrCSU, system_pdb_data = read_data(args.s, args.f)
 # write symmetric unsorted Go pairs
 sym_pairs = get_go(indBB, map_OVrCSU, args.cutoff_short, args.cutoff_long, args.go_eps_intra, seqDist, args.missres)
 

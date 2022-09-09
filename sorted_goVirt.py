@@ -281,7 +281,7 @@ def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter):
     #    print(line)
 
     # write an updated pdb file:
-    with open('updated_' + file_pref + '_cg.pdb', 'w') as f:
+    with open(file_pref + '_cg_go.pdb', 'w') as f:
         for line in upd_out_pdb:
             s2print = "ATOM  %5d %-4s %3s  %4d    %8.3f%8.3f%8.3f  1.00  0.00\n" % (line[0], line[1], line[2], line[3],
                                                                         line[4], line[5], line[6])
@@ -445,7 +445,7 @@ def get_bb_pair_sigma_epsilon(itp_filename, martini_file, sym_pairs_inter, missA
 # todo: check WHY does this function use sym_pairs_inter/intra w/o them being input params????
 def write_include_files(file_pref, missAt, indBB, missRes, Natoms, go_eps_intra, go_eps_inter, c6c12,
                 sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs, inter_pairs,
-                        virtual_sites, upd_out_pdb):
+                        virtual_sites, upd_out_pdb, fnames):
     # main.top -> martini_v3.0.0_go.itp [ atomtypes ]-> atomtypes_go.itp -> (file_pref)_atomtypes_go.itp
     # here: sets of (file_pref)_[A-D] VSites
     with open(file_pref + '_' + fnames[0], 'w') as f:
@@ -654,5 +654,5 @@ excl_b, excl_c, excl_d, intra_pairs, inter_pairs = get_exclusions(vwb_excl, vwc_
 # write the updated itp/top files:
 write_include_files(args.moltype, missAt, indBB, args.missres, args.Natoms, args.go_eps_intra,
                     args.go_eps_inter, c6c12, sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs,
-                    inter_pairs, virtual_sites, upd_out_pdb)
+                    inter_pairs, virtual_sites, upd_out_pdb, fnames)
 write_main_top_files(args.moltype, args.i, fnames)

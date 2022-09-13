@@ -5,7 +5,7 @@ import numpy as np
 import math
 import re
 
-import pandas as pd  # needed only for the get_bb_pair_sigma_epsilon() function...
+import pandas as pd  # needed for get_bb_pair_sigma_epsilon()
 
 ##################### FUNCTIONS #####################
 def user_input():
@@ -47,7 +47,8 @@ def get_settings():
               'nonbond_params_go.itp',
               'atoms_go.itp',
               'virtual_sitesn_go.itp',
-              'exclusions_go.itp']
+              'exclusions_go.itp',
+              'viz_go.itp']
 
     return seqDist, missAt, c6c12, fnames
 
@@ -164,6 +165,7 @@ def assign_chain_ids(pdb_data, bb_cutoff):
             if dist > max_dist:
                 new_chain_begins.append(system_BB_only[index+1][0])
     # new_chain_begins[ ] contains atom indices of chains 2 to n, 1st chain by default starts with 0
+    print(new_chain_begins)
 
     ######## assign the IDs based on the indices of chain "heads"
     chain_flag = 0  # this variable will change as script progresses down the list of residues
@@ -209,7 +211,7 @@ def sym_pair_sort(sym_pairs, out_pdb):
     resnr_inter = list(set(resnr_inter))
     resnr_inter.sort()
     #print(sym_pairs_inter)
-    #for line in sym_pairs_inter:
+    #for line in sym_pairs_intra:
     #    print(line)
     return sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter
 
@@ -278,7 +280,7 @@ def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter):
                 virtual_sites.append([atomnr, line[0]])
                 vwd_excl.append([k, atomnr])  # dict: key=resnr : val=atomnr
     #print(resnr_intra)
-    #for line in upd_out_pdb:
+    #for line in vwb_excl:
     #    print(line)
 
     # write an updated pdb file:
@@ -321,6 +323,8 @@ def get_exclusions(vwb_excl, vwc_excl, vwd_excl, sym_pairs_intra, sym_pairs_inte
         replaced_excl_d = [x if x not in vwd_excl_dict else vwd_excl_dict[x] for x in pair]
         excl_d.append(replaced_excl_d)
     # can this be shorter?
+    #for line in excl_b:
+    #    print(line)
     return excl_b, excl_c, excl_d, intra_pairs, inter_pairs
 
 
@@ -559,7 +563,16 @@ def write_include_files(file_pref, missAt, indBB, missRes, Natoms, go_eps_intra,
                                                     inter_pairs[ind][0], inter_pairs[ind][1])
             f.write(s2print)
 
-    # todo: visualize the go-bonds:
+    # visualize the go-bonds: (file_pref)_viz_go.itp
+    with open(file_pref + '_' + fnames[5], 'w') as f:
+        f.write('; Intra Go bonds as harmonic bonds (VWB)\n')
+        for ind in range(len(sym_pairs_intra)):
+            s2print = ' %d  %d  1  %.3f  1250\n' % (excl_b[ind][0], excl_b[ind][1], sym_pairs_intra[ind][6])
+            f.write(s2print)
+        f.write('; Inter Go bonds as harmonic bonds (VWC)\n')
+        for ind in range(len(sym_pairs_inter)):
+            s2print = ' %d  %d  1  %.3f  1250\n' % (excl_c[ind][0], excl_c[ind][1], sym_pairs_inter[ind][6])
+            f.write(s2print)
 
 
 # modifies the .top and .itp written by martinize2 (w/o -go-vs flag), inserts "#include" lines

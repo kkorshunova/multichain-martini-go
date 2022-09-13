@@ -13,6 +13,7 @@ def user_input():
     parser.add_argument('-s', help='File containing the coarse-grained structure of the protein in pdb format.')
     parser.add_argument('-f', help='File containing the contact analysis of the (atomistic) protein structure obtained from the webserver http://info.ifpan.edu.pl/~rcsu/rcsu/index.html.')
     parser.add_argument('-i', help='File containing the topology of coarse-grained protein in itp format.')
+    parser.add_argument('--nb', help='File containing martini_go.ff in itp format.')
     parser.add_argument('--moltype', default='mol',
                         help='Molecule name used as prefix in your output file names and the virtual bead names (default: mol). If you will combine your Go-like model with a coarse-grained protein generated with martinize2, you must use the same name as specified with the --govs-moltype flag of martinize2!')
     parser.add_argument('--go_eps_inter', type=float, default=9.414,
@@ -207,8 +208,8 @@ def sym_pair_sort(sym_pairs, out_pdb):
         resnr_inter.append(line[5])
     resnr_inter = list(set(resnr_inter))
     resnr_inter.sort()
-    #print(len(sym_pairs_intra), len(sym_pairs_inter))
-    #for line in sym_pairs_intra:
+    #print(sym_pairs_inter)
+    #for line in sym_pairs_inter:
     #    print(line)
     return sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter
 
@@ -324,128 +325,101 @@ def get_exclusions(vwb_excl, vwc_excl, vwd_excl, sym_pairs_intra, sym_pairs_inte
 
 
 def get_bb_pair_sigma_epsilon(itp_filename, martini_file, sym_pairs_inter, missAt):
-    temp = []
-    output_raw = []
+
+    # 1. extract "atom index - atomtype" information from the [ atoms ] section of molecule.itp
     atoms_section = []
-
-    # extract "atom index - atomtype" information from the [ atoms ] section of molecule.itp
     with open(itp_filename, 'r') as file:
-        match = False
-
+        match = False  # logical switch allows to read only lines between (excluding) the two matched lines
         for line in file:
             if re.search(r'\[ atoms ]', line):
                 match = True
-                # print(line)
                 continue
-            elif re.search(r'\[ position_restraints ]', line):
+            elif re.search(r'\[ position_restraints ]', line): # or line == '\n'
                 match = False
-                # print(line)
                 continue
             elif match:
-                output_raw.append(line.split())
-    # clean up the raw output
-    for entry in output_raw:
-        if entry:
-            temp.append([int(entry[0]), entry[1], int(entry[2]), entry[3], entry[4]])
-            #                       atom index    atomtype      resnr       resname   atomname
-    for entry in temp:
-        if entry[4] == 'BB':
-            atoms_section.append(entry)
+                line = line.split()
+                if len(line) > 1 and line[4] == 'BB':  # line length check gets rid of a new line at the end of section
+                    atoms_section.append([int(line[0]), line[1], int(line[2]), line[3]])
+                    #            atomindex    atomtype      resnr       resname
+                    #              4              SP2         3            VAL
     # create a dictionary: key: atomindex; value: atomtype
     atoms_section = np.array(atoms_section)
-    atomtype_dict = dict(zip(atoms_section[:,0], atoms_section[:,1])) # {'1': 'Q5', '2': 'P2', '4': 'SP2', ...}
-    #print(atomtype_dict)
+    atomtype_dict = dict(zip(atoms_section[:, 0].astype('int'), atoms_section[:, 1]))  # mind the typecasting!
+    # {1: 'Q5', 2: 'P2', 4: 'SP2', ...}
 
-    # create a list of atomtype pairs to match the inter Go bonds:
-    bb_index_pairs = [ ]
-    for bbpair in range(len(sym_pairs_inter)):
-        bb_index_pairs.append([str(sym_pairs_inter[bbpair][0] + missAt), str(sym_pairs_inter[bbpair][1] + missAt)])
-        # elements of bb_index_pairs list must be strings for dictionary to work below
+    # 2. dataframe for sym_pairs_inter (mind the typecasting! must match datatype of the dict keys (int)):
+    # todo: add resnumbers from sym_pairs_inter?
+    ndxpairs_df = pd.DataFrame(np.array(sym_pairs_inter)[:, 0:2].astype('int'), columns=['atomndx_i', 'atomndx_j'])
+    # map atomtype from the dictionary to atom indices; add the resulting values as new columns of the dataframe:
+    ndxpairs_df['atomtype_i'] = ndxpairs_df['atomndx_i'].map(atomtype_dict)
+    ndxpairs_df['atomtype_j'] = ndxpairs_df['atomndx_j'].map(atomtype_dict)
+    #     atomndx_i  atomndx_j atomtype_i atomtype_j
+    # 0           1        121         Q5         Q5
 
-    # replace indices (keys in dict) with atomtypes (vals in dict) using list comprehension:
-    bb_atomtype_pairs = [ ]
-    for pair in bb_index_pairs:
-        replaced_pair = [x if x not in atomtype_dict else atomtype_dict[x] for x in pair]
-        bb_atomtype_pairs.append(replaced_pair)
-        #print(pair)
-        #print(replaced_pair)
-    # temp: list of unique atomtypes found in pairs (for filtering the huge martini list below):
-    # bb_atomtypes = list(np.concatenate(bb_atomtype_pairs).flat)
-    # bb_atomtypes = list(set(bb_atomtypes)) # removed duplicates, unique entries: ['SP2a', 'SP1', 'P2', 'Q5', 'SP2']
+    # extra column containing pairs of atomtypes (to match with the unique key of the dictionary later)
+    ndxpairs_df['pair_key'] = ndxpairs_df['atomtype_i'].astype(str) + ' ' + ndxpairs_df['atomtype_j'].astype(str)
 
-    # merge pairs of atomtypes into a single string to use as a matching key in dataframe dictionary:
-    bb_atomtype_pairs_merged = []
-    for bbpair in bb_atomtype_pairs:
-        k = bbpair[0] + ' ' + bbpair[1]
-        bb_atomtype_pairs_merged.append(k)
-    # bb_atomtype_pairs_merged=['Q5 Q5', 'P2 P2', 'P2 P2',...]
+    # 3. filter for the "ff database" (martini [ nonbonded_params ]) = list of unique atomtypes found in pairs:
+    unique_atomtypes = pd.concat([ndxpairs_df['atomtype_i'], ndxpairs_df['atomtype_j']]).unique()
+    # ['Q5' 'P2' 'SP2' 'SP2a' 'SP1']
 
-    # find the sigma-epsilon values for the bb_atomtype_pairs in the database (martini_v3.0.0.itp - [ nonbond_params])
-    # open martini_v3 file:
-    martini_nonbond = [ ]
+    # 4. fetch the sigma-epsilon values in the database (martini_v3.0.0.itp - [ nonbond_params])
+    # open martini_v3 file and save all entries to a new dataframe:
+    martini_nonbond = []
     with open(martini_file, 'r') as f:
         match = False
         for line in f:
             if re.search(r'\[ nonbond_params ]', line):
                 match = True
                 continue
-            elif len(line.split()) < 5 or line == '\n': # end of [ nonbond_params ]: empty line or other N(columns)
+            elif len(line.split()) < 5 or line == '\n':  # end of [ nonbond_params ]: empty line or other N(columns)
                 match = False
                 continue
-            elif match: # for lines inside the [ nonbond_params ] section: matching and writing?
-                martini_nonbond.append(line.split())  # contains the entire nonbond section of martini
-                # alternatively: filter - if column 0 contains any of the bb_atomtypes:
-                #test = [bbtype for bbtype in line.split()[0] if any(bt in bbtype for bt in bb_atomtypes)]
-                #print(test)
+            elif match:  # for lines inside the [ nonbond_params ] section: matching and writing?
+                # todo: is it possible to apply np.where directly here?
+                line = line.split()
+                martini_nonbond.append([line[0], line[1], line[3], line[4]])  # contains the entire nonbond section of martini
 
-    #### todo: this entire section needs to be reworked
-    # create a dataframe for filtering by 2 columns... :(
-    martini_nonbond = np.array(martini_nonbond)
-    #bb_atomtype_pairs = np.array(bb_atomtype_pairs)
-    #print(martini_nonbond[:,0])
-    df1 = pd.DataFrame({ 'BB1' : martini_nonbond[:,0], 'BB2' : martini_nonbond[:,1],
-                                'sigmaBB' : martini_nonbond[:,3], 'epsBB' : martini_nonbond[:,4] })
-    df1 = df1[df1.set_index(['BB1','BB2']).index.isin(bb_atomtype_pairs)]
-    # dataframe df1 contains a list of _unique_ pairs BB1-BB2 with sigma and eps value pairs
+    nonbonded_df = pd.DataFrame(martini_nonbond, columns=['atomtype_i', 'atomtype_j', 'sigma', 'eps'])
+    # filter out the atomtypes not found in unique_atomtypes[ ] of the system (see step 3):
+    nonbonded_df = nonbonded_df[nonbonded_df['atomtype_i'].isin(unique_atomtypes) & nonbonded_df['atomtype_j'].isin(unique_atomtypes)]
+    #  atomtype_i atomtype_j         sigma           eps
+    #9438           P2         P2  4.700000e-01  4.060000e+00
+    #9698           P2        SP2  4.300000e-01  3.770000e+00
 
-    # concatenate the unique df1 with its BB1-BB2 swapped:
-    df2 = df1[['BB2','BB1','sigmaBB', 'epsBB']]
-    df = pd.concat([df1, df2.rename(columns={'BB2':'BB1', 'BB1':'BB2'})], ignore_index=True)
-    # merge BB1 and BB2 into a single column to use as a dictionary
-    df1['BB pairs'] = df1['BB1'].astype(str) + ' ' + df1['BB2'].astype(str)
-    df['BB pairs'] = df['BB1'].astype(str) + ' ' + df['BB2'].astype(str)
+    # flip the non-symmetric pairs and append them at the end (to take into account all options):
+    nonbonded_df['asym'] = np.where(nonbonded_df['atomtype_i'] == nonbonded_df['atomtype_j'], 1, 0)
+    temp_df = nonbonded_df[nonbonded_df['asym'] == 0]
+    temp_df = temp_df[['atomtype_j', 'atomtype_i', 'sigma', 'eps']] # flipped asymmetric pairs
+    nonbonded_df = nonbonded_df.drop('asym', axis=1) # get rid of the temp filter axis
+    nonbonded_df = pd.concat([ nonbonded_df, temp_df.rename(columns={'atomtype_j':'atomtype_i',
+                                                                     'atomtype_i':'atomtype_j'}) ], ignore_index=True)
+    # add a pair column and put it first:
+    nonbonded_df['pair_key'] = nonbonded_df['atomtype_i'].astype(str) + ' ' + nonbonded_df['atomtype_j'].astype(str)
+    nonbonded_df = nonbonded_df[['pair_key', 'sigma', 'eps']]
+    #  pair_key         sigma           eps
+    #0    P6 P6  4.700000e-01  4.990000e+00
+    #1    P6 P5  4.700000e-01  4.730000e+00
 
-    # rearrange columns in df so when it is transposed the 'BB pairs' is 1st line
-    df1 = df1[['BB pairs', 'sigmaBB', 'epsBB']]
-    df = df[['BB pairs', 'sigmaBB', 'epsBB']]
-    # create a dictionary out of the df1:
-    sig_eps_dict2 = df1.set_index('BB pairs').T.to_dict('list')
-    print(sig_eps_dict2)
-    sig_eps_dict = df.set_index('BB pairs').T.to_dict('list')
-    print(sig_eps_dict)
+    # transpose and turn into a dictionary with pairs (all combinations) as unique keys:
+    sig_eps_dict = nonbonded_df.set_index('pair_key').T.to_dict('list')
+    # {'P2 P2': ['4.700000e-01', '4.060000e+00'], 'P2 SP2': ['4.300000e-01', '3.770000e+00'], ...}
 
-    # use the dictionary to write a 2d list:
-    final_bb_entries = [ ]
-    for i in bb_atomtype_pairs_merged:
-        temp_line = [x if x not in sig_eps_dict else sig_eps_dict[x] for x in i]
-        final_bb_entries.append(temp_line)
-        if (i in sig_eps_dict):
-            print(i, 'true')
-        else:
-            print(i, 'false')
-    #### todo: end of  section
+    # map the dictionary entries onto the dataframe of index pairs and append the matching sigma/eps pairs as new col:
+    ndxpairs_df['new'] = ndxpairs_df['pair_key'].map(sig_eps_dict)
+    # split the 'new' column into sigma and epsilon:
+    sig_eps = pd.DataFrame(ndxpairs_df['new'].to_list(), columns=['sigma', 'eps'])
+    sigma_d = sig_eps['sigma'].to_list()  # final list of all sigmas
+    eps_d = sig_eps['eps'].to_list()  # final list of all eps values (hopefully, in order...)
 
-
-
-    return atoms_section, bb_atomtype_pairs
+    return sigma_d, eps_d
 
 
 ########## FILE WRITING PROCEDURES ##########
-# todo: routines same as in old version, just repeated for sym_pars_intra/inter separately
-# todo: check WHY does this function use sym_pairs_inter/intra w/o them being input params????
 def write_include_files(file_pref, missAt, indBB, missRes, Natoms, go_eps_intra, go_eps_inter, c6c12,
                 sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs, inter_pairs,
-                        virtual_sites, upd_out_pdb, fnames):
+                        virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d):
     # main.top -> martini_v3.0.0_go.itp [ atomtypes ]-> atomtypes_go.itp -> (file_pref)_atomtypes_go.itp
     # here: sets of (file_pref)_[A-D] VSites
     with open(file_pref + '_' + fnames[0], 'w') as f:
@@ -473,7 +447,7 @@ def write_include_files(file_pref, missAt, indBB, missRes, Natoms, go_eps_intra,
         s2print = '#include "%s_%s"\n' % (file_pref, fnames[0])
         f.write(s2print)
 
-    # main.top -> martini_v3.0.0_go.itp [ nonbond_params ]-> nonbond_params_go.itp -> (file_pref)_nonbond_params.itp
+    # main.top -> martini_v3.0.0_go.itp [ nonbond_params ]-> nonbond_params_go.itp -> (file_pref)_nonbond_params_go.itp
     with open(file_pref + '_' + fnames[1], 'w') as f:
         f.write('; OV + symmetric rCSU contacts \n')
         if (c6c12 == 1):  # this setting uses sigma/eps computed using Vii, Wii
@@ -519,13 +493,13 @@ def write_include_files(file_pref, missAt, indBB, missRes, Natoms, go_eps_intra,
                 f.write(s2print)
             f.write('; INTER section: D (-go_eps_BB) \n')
             for k in range(0, len(sym_pairs_inter)):
-                # todo: replace sym_pairs_inter[k][7] and go_eps_inter  with BB sigma/eps values
+                # replaced sym_pairs_inter[k][7] and go_eps_inter with BB sigma/eps values
                 s2print = ' %s_D%s  %s_D%s    1  %.10f  %.10f  ;  %s  %s  %.3f \n' % (file_pref,
                                                                                       str(int(sym_pairs_inter[k][4])),
                                                                                       file_pref,
                                                                                       str(int(sym_pairs_inter[k][5])),
-                                                                                      sym_pairs_inter[k][7],
-                                                                                      -go_eps_inter + 0.00001,  # avoid exact val
+                                                                                      float(sigma_d[k]),
+                                                                                      -float(eps_d[k]) + 0.00001,  # avoid exact val
                                                                                       str(int(sym_pairs_inter[k][0]) +missAt),
                                                                                       str(int(sym_pairs_inter[k][1]) +missAt),
                                                                                       sym_pairs_inter[k][6])
@@ -585,7 +559,7 @@ def write_include_files(file_pref, missAt, indBB, missRes, Natoms, go_eps_intra,
                                                     inter_pairs[ind][0], inter_pairs[ind][1])
             f.write(s2print)
 
-    # visualize the go-bonds:
+    # todo: visualize the go-bonds:
 
 
 # modifies the .top and .itp written by martinize2 (w/o -go-vs flag), inserts "#include" lines
@@ -643,8 +617,8 @@ sym_pairs = get_go(indBB, map_OVrCSU, args.cutoff_short, args.cutoff_long, args.
 out_pdb = assign_chain_ids(system_pdb_data, args.bb_cutoff)
 # group sym_pairs into intra and inter based on their chain IDs
 sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter = sym_pair_sort(sym_pairs, out_pdb)
-# todo: this entire function
-#atoms_section, bb_atomtype_pairs = get_bb_pair_sigma_epsilon('insulin.itp', 'martini_v3.0.0.itp', sym_pairs_inter, missAt)
+# retrieve sigma-epsilon values for each BB involved in intra-Go bonds (for D virtual sites)
+sigma_d, eps_d = get_bb_pair_sigma_epsilon(args.i, args.nb, sym_pairs_inter, missAt)
 
 
 # write the updated pdb file (VS A-D):
@@ -654,5 +628,5 @@ excl_b, excl_c, excl_d, intra_pairs, inter_pairs = get_exclusions(vwb_excl, vwc_
 # write the updated itp/top files:
 write_include_files(args.moltype, missAt, indBB, args.missres, args.Natoms, args.go_eps_intra,
                     args.go_eps_inter, c6c12, sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs,
-                    inter_pairs, virtual_sites, upd_out_pdb, fnames)
+                    inter_pairs, virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d)
 write_main_top_files(args.moltype, args.i, fnames)

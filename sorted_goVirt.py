@@ -56,23 +56,29 @@ def get_settings():
 # read_data() parses data from the .map file (output of the rCSU server), stores it in temporary files
 # returns lists: indBB (list of xyz coords of BB), map_OVrCSU (list: resID resID distance...), pdb_data
 def read_data(cg_pdb, file_contacts):
-    # read the pdb file
+    # read the pdb file: mind the fixed file format!
     pdb_data = [ ]
     indBB = [ ]  # separate from pdb_data[] because indBB needs to be a numpy array
     with open(cg_pdb, 'r') as file:
         # create a 2d array with all relevant data: pdb_data columns 1-3,5-8
         #    here: omitted chain_id (column 4)
         for line in file:
-            line = line.split()
-            if line[0] == 'ATOM' and line[2] != 'CA':  # double check we are using only the relevant pdb records
+            if line[0:4] == 'ATOM' and line[12:16].strip() != 'CA':
                 # later: more flexible ways to filter out unnecessary VSs written by martinize?
                 # save only relevant columns in pdb_data + add column for chain id:
                 pdb_data.append(
-                    [int(line[1]), line[2], line[3], int(line[5]), float(line[6]), float(line[7]), float(line[8]), 0])
-                #      atomnr     atomname   resname      resnr      x         y         z       chain_id
+                    [int(line[6:11].strip()),  # atomnr
+                     line[12:16].strip(),  # atomname
+                     line[17:20],  # resname
+                     int(line[22:26].strip()),  # resnr
+                     float(line[30:38].strip()),  # x
+                     float(line[38:46].strip()),  # y
+                     float(line[46:54].strip()),  # z
+                     0])  # chain_id placeholder
                 #  e.g.: [1, 'BB', 'GLY', 1, -26.214, 5.188, -11.96, 0]
-                if line[2] == 'BB':
-                    indBB.append([int(line[1]), float(line[6]), float(line[7]), float(line[8])])
+                if line[12:16].strip() == 'BB':
+                    indBB.append([int(line[6:11].strip()),
+                                  float(line[30:38].strip()), float(line[38:46].strip()), float(line[46:54].strip())])
                     # indBB:           atomnr           x              y              z
             else:
                 continue  # skips irrelevant lines (e.g. CONECT if it's present in file)
@@ -210,9 +216,12 @@ def sym_pair_sort(sym_pairs, out_pdb):
         resnr_inter.append(line[5])
     resnr_inter = list(set(resnr_inter))
     resnr_inter.sort()
-    #print(sym_pairs_inter)
-    #for line in sym_pairs_intra:
-    #    print(line)
+    # print('INTRA pairs')
+    # for line in sym_pairs_intra:
+    #     print(line)
+    # print('INTER pairs')
+    # for line in sym_pairs_inter:
+    #     print(line)
     return sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter
 
 
@@ -601,6 +610,7 @@ def write_main_top_files(file_pref, molecule_itp, fnames):
         f.write('#include "' + file_pref + '_' + fnames[2] + '"\n\n')  # [ atoms ]
         for line in block_2:
             f.write(line)
+        #todo: check if .itp file already has the virtual_sitesn secion!
         f.write('\n[ virtual_sitesn ]\n#include "' + file_pref + '_' + fnames[3] + '"\n\n')  # [ virtual_sitesn ]
         for line in block_3:
             f.write(line)

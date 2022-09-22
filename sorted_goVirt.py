@@ -6,6 +6,13 @@ import math
 import re
 
 import pandas as pd  # needed for get_bb_pair_sigma_epsilon()
+import itertools  # needed for write_main_top()
+
+
+def itp_sections(x):  # helper function used to slice input itp into sections (called in write_main_top())
+    if x.startswith('[ '):
+        itp_sections.count += 1
+    return itp_sections.count
 
 ##################### FUNCTIONS #####################
 def user_input():
@@ -24,8 +31,8 @@ def user_input():
                         help='Lower cutoff distance [nm]: contacts with a shorter distance than cutoff_short are not included in the Go-like interactions (default: 0.3).')
     parser.add_argument('--cutoff_long', type=float, default=1.1,
                         help='Upper cutoff distance [nm]: contacts with a longer distance than cutoff_long are not included in the Go-like interactions (default: 1.1).')
-    parser.add_argument('--Natoms', type=int,
-                        help='Number of coarse-grained beads in the protein excluding the virtual Go beads.')
+    #parser.add_argument('--Natoms', type=int,
+    #                    help='Number of coarse-grained beads in the protein excluding the virtual Go beads.')
     parser.add_argument('--missres', type=int, default=0,
                         help='Number of missing residues at the beginning of the atomistic pdb structure which is needed if the numbering of the coarse-grained structure starts at 1 (default: 0).')
     parser.add_argument('--bb_cutoff', type=int, default=10,
@@ -430,7 +437,7 @@ def get_bb_pair_sigma_epsilon(itp_filename, martini_file, sym_pairs_inter, missA
 
 
 ########## FILE WRITING PROCEDURES ##########
-def write_include_files(file_pref, missAt, indBB, missRes, Natoms, go_eps_intra, go_eps_inter, c6c12,
+def write_include_files(file_pref, missAt, indBB, missRes, go_eps_intra, go_eps_inter, c6c12,
                 sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs, inter_pairs,
                         virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d):
     # main.top -> martini_v3.0.0_go.itp [ atomtypes ]-> atomtypes_go.itp -> (file_pref)_atomtypes_go.itp
@@ -586,35 +593,57 @@ def write_include_files(file_pref, missAt, indBB, missRes, Natoms, go_eps_intra,
 
 # modifies the .top and .itp written by martinize2 (w/o -go-vs flag), inserts "#include" lines
 def write_main_top_files(file_pref, molecule_itp, fnames):
-    # store the entire molecule.itp as a list (1d, 1 element = 1 line as str)
-    input_itp = [ ]
+    itp_file = [ ]
+    itp_sections.count = 0
+    itp_go_sections = ['[ virtual_sitesn ]\n', '[ exclusions ]\n']  # sections requiring modification by Go
+    # [ atoms ] section can't be missing; check only for the other two
+    input_itp_headers = [ ]
     with open(molecule_itp, 'r') as f:
-        for line in f:
-            input_itp.append(line)
-    # separate the itp file into blocks based on where the additional lines need to go
-    # here, 3 additions must be made: 1. end of [ atoms ] (before [ posres ]), 2. before [ angles ], 3. at the EOF
-    block_1 = input_itp[:input_itp.index('[ position_restraints ]\n')]
-    if block_1[-1]=='\n':  # the newline will be re-added later
-        del block_1[-1]
-    block_2 = input_itp[input_itp.index('[ position_restraints ]\n'):input_itp.index('[ angles ]\n')]
-    if block_2[-1]=='\n':  # the newline will be re-added later
-        del block_2[-1]
-    block_3 = input_itp[input_itp.index('[ angles ]\n'):]
-    if block_3[-1]=='\n':  # the newline will be re-added later
-        del block_3[-1]
-
-    # insert needed lines between blocks and save the new itp file:
+        for key, section in itertools.groupby(f, itp_sections):
+            # print(list(section))
+            itp_file.append(list(section))
+    # get headers from the input itp:
+    for sect in itp_file:
+        if sect[0].startswith('[ '):
+            # print(elm[0])
+            input_itp_headers.append(sect[0])
+    # find missing headers:
+    missing_headers = list(set(itp_go_sections) - set(input_itp_headers))
+    # write out the (modified) itp file
     with open(file_pref + '_go.itp', 'w') as f:
-        for line in block_1:
-            f.write(line)
-        f.write('#include "' + file_pref + '_' + fnames[2] + '"\n\n')  # [ atoms ]
-        for line in block_2:
-            f.write(line)
-        #todo: check if .itp file already has the virtual_sitesn secion!
-        f.write('\n[ virtual_sitesn ]\n#include "' + file_pref + '_' + fnames[3] + '"\n\n')  # [ virtual_sitesn ]
-        for line in block_3:
-            f.write(line)
-        f.write('#include "' + file_pref + '_' + fnames[4] + '"\n')  # [ exclusions ]
+        for section in itp_file:
+            if 'moleculetype' in section[0]:  # rewrite this section entirely with the right molecule name
+                f.write(section[0])
+                f.write(file_pref + '    1\n\n')
+            elif 'atoms' in section[0]:  # how to filter for sections that will be expanded
+                for line in section:
+                    f.write(line)
+                f.write('#include "' + file_pref + '_' + fnames[2] + '"\n\n')
+            elif 'virtual_sitesn' in section[0]:  # check if the input itp already contains the VS section
+                for line in section:
+                    f.write(line)
+                f.write('#include "' + file_pref + '_' + fnames[3] + '"\n\n')  # [ virtual_sitesn ]
+            elif 'exclusions' in section[0]:
+                for line in section:
+                    f.write(line)
+                f.write('#include "' + file_pref + '_' + fnames[4] + '"\n\n')
+            else:
+                for line in section:
+                    f.write(line)
+    # if there are missing sections, include them at the end:
+        if missing_headers:
+            if 'virtual_sitesn' in missing_headers[0]:
+                f.write('\n' + missing_headers[0])
+                f.write('#include "' + file_pref + '_' + fnames[3] + '"\n')
+                missing_headers.pop(0)
+            elif 'exclusions' in missing_headers[0]:
+                f.write('\n' + missing_headers[0])
+                f.write('#include "' + file_pref + '_' + fnames[4] + '"\n')
+                missing_headers.pop(0)
+            # check if anything left in missing_headers:
+            if missing_headers: # if yes, then it must be excusions
+                f.write('\n' + missing_headers[0])
+                f.write('#include "' + file_pref + '_' + fnames[4] + '"\n')
 
     # write updated .top file from scratch:
     with open(file_pref+'_go.top', 'w') as f:
@@ -623,7 +652,6 @@ def write_main_top_files(file_pref, molecule_itp, fnames):
         f.write('#include "' + file_pref + '_go.itp"\n\n')
         f.write('[ system ]\n'+ file_pref + ' complex with Go bonds\n\n')
         f.write('[ molecules ]\n' + file_pref + '     1 \n') # check if 1 can be a variable
-
 
 
 ##################### MAIN #####################
@@ -649,7 +677,7 @@ vwb_excl, vwc_excl, vwd_excl, virtual_sites, upd_out_pdb = update_pdb(args.molty
 excl_b, excl_c, excl_d, intra_pairs, inter_pairs = get_exclusions(vwb_excl, vwc_excl, vwd_excl, sym_pairs_intra,
                                                                   sym_pairs_inter)
 # write the updated itp/top files:
-write_include_files(args.moltype, missAt, indBB, args.missres, args.Natoms, args.go_eps_intra,
+write_include_files(args.moltype, missAt, indBB, args.missres, args.go_eps_intra,
                     args.go_eps_inter, c6c12, sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs,
                     inter_pairs, virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d)
 write_main_top_files(args.moltype, args.i, fnames)

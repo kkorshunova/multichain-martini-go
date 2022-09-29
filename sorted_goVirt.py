@@ -36,8 +36,8 @@ def user_input():
     parser.add_argument('--bb_cutoff', type=int, default=10,
                         help='Max distance (in A) allowed between next-neighbor BBs (default: 10 A).')
     parser.add_argument('--chain_sort', type=int, default=0,
-                        help='Chain sorting method: 0 = simple distance-based (default), 1 = pdb chain-ID based, 2 = user input based (provide txt file with comma-separated residue numbers)')
-    parser.add_argument('--chain_file', help='File containing comma-separated residue indices of first residue in each protein chain, starting from 2nd chain.')
+                        help='Chain sorting method: 0 = distance-based (default), 1 = pdb chain-ID based, 2 = user input based (provide txt file with comma-separated residue numbers)')
+    parser.add_argument('--chain_file', help='File containing chain IDs (one per line; same order as input CG PDB)')
     args = parser.parse_args()
     return args
 
@@ -67,11 +67,12 @@ def read_data(cg_pdb, file_contacts):
     # read the pdb file: mind the fixed file format!
     pdb_data = [ ]
     indBB = [ ]  # separate from pdb_data[] because indBB needs to be a numpy array
-    old_chain_ids = [ ]  # character-based chain IDs from the pdb
+    pdb_chain_ids = [ ]  # character-based chain IDs from the pdb
     with open(cg_pdb, 'r') as file:
         # create a 2d array with all relevant data: pdb_data columns 1-3,5-8
         #    here: omitted chain_id (column 4)
         for line in file:
+            # later: pdb records HELIX, SHEET, SSBOND have different formats - not found in martinize2 output?
             if line[0:4] == 'ATOM' and line[12:16].strip() != 'CA':
                 # later: more flexible ways to filter out unnecessary VSs written by martinize?
                 # save only relevant columns in pdb_data + add column for chain id:
@@ -85,11 +86,11 @@ def read_data(cg_pdb, file_contacts):
                      float(line[46:54].strip()),  # z
                      0])  # chain_id placeholder
                 #  e.g.: [1, 'BB', 'GLY', 1, -26.214, 5.188, -11.96, 0]
+                pdb_chain_ids.append(line[21])  # chain IDs for all atoms
                 if line[12:16].strip() == 'BB':
                     indBB.append([int(line[6:11].strip()),
                                   float(line[30:38].strip()), float(line[38:46].strip()), float(line[46:54].strip())])
                     # indBB:           atomnr           x              y              z
-                    old_chain_ids.append(line[21])  # chain IDs for BB atoms
             else:
                 continue  # skips irrelevant lines (e.g. CONECT if it's present in file)
     indBB = np.array(indBB)
@@ -116,7 +117,7 @@ def read_data(cg_pdb, file_contacts):
                     map_OVrCSU.append(
                         [float(line[5]), float(line[9]), float(line[10])])  # instead of 'cols = [5, 9, 10]'
 
-    return indBB, map_OVrCSU, pdb_data, old_chain_ids
+    return indBB, map_OVrCSU, pdb_data, pdb_chain_ids
 
 
 # get_go() calculates and filters the Go pairs according to requirements (AT server map data -> CG structure)
@@ -159,15 +160,14 @@ def get_go(indBB, map_OVrCSU, cutoff_short, cutoff_long, go_eps_intra, seqDist, 
 
 
 ########## INTRA-INTER SORTING PROCEDURES ##########
-def assign_chain_ids(pdb_data, bb_cutoff, old_chain_ids, chain_sort_method, chain_file):
-    ######## find chain "heads"
-    new_chain_begins = []  # list of atom indices which start a new chain (starting from 2nd chain)
-    system_BB_only = []
-    for line in pdb_data:
-        if line[1] == 'BB':  # select only BB lines:
-            system_BB_only.append(line)
-    # default: distance-based approach
+def assign_chain_ids(pdb_data, bb_cutoff, pdb_chain_ids, chain_sort_method, chain_file):
+    # Distance-based method: only works for whole chains (no fragments), with all atoms in order
     if chain_sort_method == 0:
+        new_chain_begins = []  # list of atom indices which start a new chain (starting from 2nd chain)
+        system_BB_only = []
+        for line in pdb_data:
+            if line[1] == 'BB':  # select only BB lines:
+                system_BB_only.append(line)
         # set the cutoff distance
         max_dist = pow(bb_cutoff, 2)  # (squared, A) distance between two consecutive residues in backbone
         # compute squared distances between sequential BBs
@@ -181,44 +181,40 @@ def assign_chain_ids(pdb_data, bb_cutoff, old_chain_ids, chain_sort_method, chai
                        + math.pow((system_BB_only[index][6] - system_BB_only[index+1][6]), 2)
                 if dist > max_dist:
                     new_chain_begins.append(system_BB_only[index+1][0])
-    # chainID-based approach (doesn't work with output of martinize2 with -merge option)
+        ######## assign the IDs based on the indices of chain "heads"
+        chain_flag = 0  # this variable will change as script progresses down the list of residues
+        current_switch = new_chain_begins.pop(0)
+        for line in system_pdb_data:
+            if line[0] == current_switch:
+                chain_flag += 1
+                if new_chain_begins:  # avoid popping an empty list: if only 1 element in list, this step is omitted
+                    current_switch = new_chain_begins.pop(0)
+            line[-1] = chain_flag
+    # PDB-ID based method
     elif chain_sort_method == 1:  # chain-ID based approach
-        ndx_BB_only = [ ]
-        for ndx in range(len(system_BB_only)):
-            ndx_BB_only.append(system_BB_only[ndx][0])  # atom indices of BBs
-        for ndx in range(len(ndx_BB_only)):
-            if ndx+1 < len(ndx_BB_only):  # prevents from going out of index range
-                if old_chain_ids[ndx] != old_chain_ids[ndx+1]:
-                    new_chain_begins.append(ndx_BB_only[ndx+1])
-    # user input-based approach (IMPORTANT: residue numbers must be in order of appearance in pdb)
+        # insert pdb_chain_ids into the last column:
+        for ndx in range(len(system_pdb_data)):
+            system_pdb_data[ndx][-1] = pdb_chain_ids[ndx]  # these are now strings
+    # User input based method
     elif chain_sort_method == 2:
-        # read and store the list of resids from the txt file (as integers)
-        input_chain_resids = []
+        # insert user input ids into the last column:
+        # step 1: basic check if the file has the correct amount of entries
+        with open(chain_file, 'r') as f:
+            for counter, line in enumerate(f):
+                pass
+        if counter + 1 != len(system_pdb_data):
+            exit(
+                "Error: Number of lines in {} file ({}) is not consistent with the number of ATOM records in input pdb ({})"
+                .format(chain_file, counter + 1, len(system_pdb_data)))
+        # step 2: open the file again and store the entries in a list:
+        userinput_ids = [ ]
         with open(chain_file, 'r') as f:
             for line in f:
-                line = line.split(',')
-                for ind in line:
-                    input_chain_resids.append(int(ind.strip()))  # strip gets rid of both spaces and '\n'
-        # find BB atom indices for the input resids:
-        for ndx in range(len(system_BB_only)):
-            if input_chain_resids and system_BB_only[ndx][3] == input_chain_resids[0]:
-                new_chain_begins.append(system_BB_only[ndx][0])
-                input_chain_resids.pop(0)
-    # new_chain_begins[ ] contains BB atom indices of chains 2 to n, 1st chain by default starts with 0
-    #print(new_chain_begins)
-
-    ######## assign the IDs based on the indices of chain "heads"
-    chain_flag = 0  # this variable will change as script progresses down the list of residues
-    system_pdb_data_out = [ ]
-    current_switch = new_chain_begins.pop(0)
-    for line in system_pdb_data:
-        if line[0] == current_switch:
-            chain_flag += 1
-            if new_chain_begins:  # avoid popping an empty list: if only 1 element in list, this step is omitted
-                current_switch = new_chain_begins.pop(0)
-        line[-1] = chain_flag
-        system_pdb_data_out.append(line)
-    return system_pdb_data_out
+                userinput_ids.append(line.strip())
+        # step 3: insert chain ids into the pdb_data
+        for ndx in range(len(system_pdb_data)):
+            system_pdb_data[ndx][-1] = userinput_ids[ndx]
+    return system_pdb_data
 
 
 # sym_pair_sort() separates sym_pairs into sym_pairs_intra and sym_pairs_inter based on the output of out_pdb
@@ -687,12 +683,12 @@ args = user_input()
 # write temp files, initialize more vars:
 seqDist, missAt, c6c12, fnames = get_settings()
 # read contact map data and store it in lists:
-indBB, map_OVrCSU, system_pdb_data, old_chain_ids = read_data(args.s, args.f)
+indBB, map_OVrCSU, system_pdb_data, pdb_chain_ids = read_data(args.s, args.f)
 # write symmetric unsorted Go pairs
 sym_pairs = get_go(indBB, map_OVrCSU, args.cutoff_short, args.cutoff_long, args.go_eps_intra, seqDist, args.missres)
 
 # sort Go pairs into intra and inter sub-lists:
-out_pdb = assign_chain_ids(system_pdb_data, args.bb_cutoff, old_chain_ids, args.chain_sort, args.chain_file)
+out_pdb = assign_chain_ids(system_pdb_data, args.bb_cutoff, pdb_chain_ids, args.chain_sort, args.chain_file)
 # group sym_pairs into intra and inter based on their chain IDs
 sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter = sym_pair_sort(sym_pairs, out_pdb)
 # retrieve sigma-epsilon values for each BB involved in intra-Go bonds (for D virtual sites)

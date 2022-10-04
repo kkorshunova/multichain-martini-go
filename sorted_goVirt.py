@@ -8,6 +8,18 @@ import re
 import pandas as pd  # needed for get_bb_pair_sigma_epsilon()
 import itertools  # needed for write_main_top()
 
+# global variables:
+seqDist = 4  # minimal distance in the sequence to add a elastic bond (ElNedyn=3 [Perriole2009]; Go=4 [Poma2017])
+# (this has to result in the correct atom number when added to "k_at" compared to the .itp file)
+c6c12 = 0  # if set to 1, the C6 and C12 term are expected in the .itp file; if set to 0, sigma and go_eps are used
+
+# names of the output included itp files:
+fnames = ['atomtypes_go.itp',
+          'nonbond_params_go.itp',
+          'atoms_go.itp',
+          'virtual_sitesn_go.itp',
+          'exclusions_go.itp',
+          'viz_go.itp']
 
 def itp_sections(x):  # helper function used to slice input itp into sections (called in write_main_top())
     if x.startswith('[ '):
@@ -40,26 +52,6 @@ def user_input():
     parser.add_argument('--chain_file', help='File containing chain IDs (one per line; same order as input CG PDB)')
     args = parser.parse_args()
     return args
-
-
-# get_settings() initializes "global" vars (names of output files, some numerical values)
-# todo: define as global vars? no function needed here
-def get_settings():
-    # some variables
-    seqDist = 4         # minimal distance in the sequence to add a elastic bond (ElNedyn=3 [Perriole2009]; Go=4 [Poma2017])
-    missAt = 0          # todo: is this used? number of missing atoms at the beginning of pdb structure
-                        # (this has to result in the correct atom number when added to "k_at" compared to the .itp file)
-    c6c12 = 0           # if set to 1, the C6 and C12 term are expected in the .itp file; if set to 0, sigma and go_eps are used
-
-    # names of the output included itp files:
-    fnames = ['atomtypes_go.itp',
-              'nonbond_params_go.itp',
-              'atoms_go.itp',
-              'virtual_sitesn_go.itp',
-              'exclusions_go.itp',
-              'viz_go.itp']
-
-    return seqDist, missAt, c6c12, fnames
 
 
 # read_data() parses data from the .map file (output of the rCSU server), stores it in temporary files
@@ -124,7 +116,7 @@ def read_data(cg_pdb, file_contacts):
 # get_go() calculates and filters the Go pairs according to requirements (AT server map data -> CG structure)
 # returns: sym_pairs = [0:indBB, 1:indBB, 2:sigma, 3:eps, 4:resnr, 5:resnr, 6:distance, 7:sigma_const]
 #                     0, 1 - exclusions (molecule.itp)   2,3 - ignored   4-7 - go_table (martini.itp)
-# todo: get rid of Vii and Wii - they're not used anyway!
+# Vii and Wii:  not used in current ver., leftover from the original create_goVirt.py
 def get_go(indBB, map_OVrCSU, cutoff_short, cutoff_long, go_eps_intra, seqDist, missRes):
     # calculate the distances based on the coordinates of the CG BB bead
     for k in range(0, len(map_OVrCSU)):
@@ -182,7 +174,7 @@ def assign_chain_ids(pdb_data, bb_cutoff, pdb_chain_ids, chain_sort_method, chai
                        + math.pow((system_BB_only[index][6] - system_BB_only[index+1][6]), 2)
                 if dist > max_dist:
                     new_chain_begins.append(system_BB_only[index+1][0])
-        ######## assign the IDs based on the indices of chain "heads"
+        # assign the IDs based on the indices of chain "heads"
         chain_flag = 0  # this variable will change as script progresses down the list of residues
         current_switch = new_chain_begins.pop(0)
         for line in system_pdb_data:
@@ -367,7 +359,7 @@ def get_exclusions(vwb_excl, vwc_excl, vwd_excl, sym_pairs_intra, sym_pairs_inte
     return excl_b, excl_c, excl_d, intra_pairs, inter_pairs
 
 
-def get_bb_pair_sigma_epsilon(itp_filename, martini_file, sym_pairs_inter, missAt):
+def get_bb_pair_sigma_epsilon(itp_filename, martini_file, sym_pairs_inter):
 
     # 1. extract "atom index - atomtype" information from the [ atoms ] section of molecule.itp
     atoms_section = []
@@ -428,8 +420,8 @@ def get_bb_pair_sigma_epsilon(itp_filename, martini_file, sym_pairs_inter, missA
     # filter out the atomtypes not found in unique_atomtypes[ ] of the system (see step 3):
     nonbonded_df = nonbonded_df[nonbonded_df['atomtype_i'].isin(unique_atomtypes) & nonbonded_df['atomtype_j'].isin(unique_atomtypes)]
     #  atomtype_i atomtype_j         sigma           eps
-    #9438           P2         P2  4.700000e-01  4.060000e+00
-    #9698           P2        SP2  4.300000e-01  3.770000e+00
+    # 9438           P2         P2  4.700000e-01  4.060000e+00
+    # 9698           P2        SP2  4.300000e-01  3.770000e+00
 
     # flip the non-symmetric pairs and append them at the end (to take into account all options):
     nonbonded_df['asym'] = np.where(nonbonded_df['atomtype_i'] == nonbonded_df['atomtype_j'], 1, 0)
@@ -442,8 +434,8 @@ def get_bb_pair_sigma_epsilon(itp_filename, martini_file, sym_pairs_inter, missA
     nonbonded_df['pair_key'] = nonbonded_df['atomtype_i'].astype(str) + ' ' + nonbonded_df['atomtype_j'].astype(str)
     nonbonded_df = nonbonded_df[['pair_key', 'sigma', 'eps']]
     #  pair_key         sigma           eps
-    #0    P6 P6  4.700000e-01  4.990000e+00
-    #1    P6 P5  4.700000e-01  4.730000e+00
+    # 0    P6 P6  4.700000e-01  4.990000e+00
+    # 1    P6 P5  4.700000e-01  4.730000e+00
 
     # transpose and turn into a dictionary with pairs (all combinations) as unique keys:
     sig_eps_dict = nonbonded_df.set_index('pair_key').T.to_dict('list')
@@ -460,7 +452,7 @@ def get_bb_pair_sigma_epsilon(itp_filename, martini_file, sym_pairs_inter, missA
 
 
 ########## FILE WRITING PROCEDURES ##########
-def write_include_files(file_pref, missAt, missRes, go_eps_intra, go_eps_inter, c6c12,
+def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,
                 sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs, inter_pairs,
                         virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d):
     # main.top -> martini_v3.0.0_go.itp [ atomtypes ]-> atomtypes_go.itp -> (file_pref)_atomtypes_go.itp
@@ -505,8 +497,8 @@ def write_include_files(file_pref, missAt, missRes, go_eps_intra, go_eps_inter, 
                                                                                       str(int(sym_pairs_intra[k][5])),
                                                                                       sym_pairs_intra[k][7],
                                                                                       go_eps_intra,
-                                                                                      str(int(sym_pairs_intra[k][0]) +missAt),
-                                                                                      str(int(sym_pairs_intra[k][1]) +missAt),
+                                                                                      str(int(sym_pairs_intra[k][0])),
+                                                                                      str(int(sym_pairs_intra[k][1])),
                                                                                       sym_pairs_intra[k][6])
                 f.write(s2print)
                 # VWB-VWB pair: BB -go_eps_intra
@@ -516,10 +508,8 @@ def write_include_files(file_pref, missAt, missRes, go_eps_intra, go_eps_inter, 
                                                                                       str(int(sym_pairs_intra[k][5])),
                                                                                       sym_pairs_intra[k][7],
                                                                                       -go_eps_intra + 0.00001,  # avoid exact val
-                                                                                      str(int(sym_pairs_intra[k][
-                                                                                                  0]) + missAt),
-                                                                                      str(int(sym_pairs_intra[k][
-                                                                                                  1]) + missAt),
+                                                                                      str(int(sym_pairs_intra[k][0])),
+                                                                                      str(int(sym_pairs_intra[k][1])),
                                                                                       sym_pairs_intra[k][6])
                 f.write(s2print)
             f.write('; INTER section: C (go_eps_inter) \n')
@@ -530,8 +520,8 @@ def write_include_files(file_pref, missAt, missRes, go_eps_intra, go_eps_inter, 
                                                                                       str(int(sym_pairs_inter[k][5])),
                                                                                       sym_pairs_inter[k][7],
                                                                                       go_eps_inter,
-                                                                                      str(int(sym_pairs_inter[k][0]) +missAt),
-                                                                                      str(int(sym_pairs_inter[k][1]) +missAt),
+                                                                                      str(int(sym_pairs_inter[k][0])),
+                                                                                      str(int(sym_pairs_inter[k][1])),
                                                                                       sym_pairs_inter[k][6])
                 f.write(s2print)
             f.write('; INTER section: D (-go_eps_BB) \n')
@@ -543,8 +533,8 @@ def write_include_files(file_pref, missAt, missRes, go_eps_intra, go_eps_inter, 
                                                                                       str(int(sym_pairs_inter[k][5])),
                                                                                       float(sigma_d[k]),
                                                                                       -float(eps_d[k]) + 0.00001,  # avoid exact val
-                                                                                      str(int(sym_pairs_inter[k][0]) +missAt),
-                                                                                      str(int(sym_pairs_inter[k][1]) +missAt),
+                                                                                      str(int(sym_pairs_inter[k][0])),
+                                                                                      str(int(sym_pairs_inter[k][1])),
                                                                                       sym_pairs_inter[k][6])
                 f.write(s2print)
     # add the name of the created .itp file into the wrapper go-table_VirtGoSites.itp
@@ -680,8 +670,6 @@ def write_main_top_files(file_pref, molecule_itp, fnames):
 ##################### MAIN #####################
 # parse input arguments, initialize some vars:
 args = user_input()
-# write temp files, initialize more vars:
-seqDist, missAt, c6c12, fnames = get_settings()
 # read contact map data and store it in lists:
 indBB, map_OVrCSU, system_pdb_data, pdb_chain_ids = read_data(args.s, args.f)
 # write symmetric unsorted Go pairs
@@ -692,7 +680,7 @@ out_pdb = assign_chain_ids(system_pdb_data, args.bb_cutoff, pdb_chain_ids, args.
 # group sym_pairs into intra and inter based on their chain IDs
 sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter = sym_pair_sort(sym_pairs, out_pdb)
 # retrieve sigma-epsilon values for each BB involved in intra-Go bonds (for D virtual sites)
-sigma_d, eps_d = get_bb_pair_sigma_epsilon(args.i, args.nb, sym_pairs_inter, missAt)
+sigma_d, eps_d = get_bb_pair_sigma_epsilon(args.i, args.nb, sym_pairs_inter)
 
 
 # write the updated pdb file (VS A-D):
@@ -700,7 +688,7 @@ vwb_excl, vwc_excl, vwd_excl, virtual_sites, upd_out_pdb = update_pdb(args.molty
 excl_b, excl_c, excl_d, intra_pairs, inter_pairs = get_exclusions(vwb_excl, vwc_excl, vwd_excl, sym_pairs_intra,
                                                                   sym_pairs_inter)
 # write the updated itp/top files:
-write_include_files(args.moltype, missAt, args.missres, args.go_eps_intra,
+write_include_files(args.moltype, args.missres, args.go_eps_intra,
                     args.go_eps_inter, c6c12, sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs,
                     inter_pairs, virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d)
 write_main_top_files(args.moltype, args.i, fnames)

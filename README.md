@@ -1,7 +1,7 @@
 # [temp name]: sorted_goVirt
 - Generalization of the Martini-Go scheme originally developed by Poma et al. (2017) for multichain CG protein complexes.
 
-## Pepository contents:
+## Repository contents:
 - sorted_goVirt.py (the script itself)
 - docs/ (directory currently containing the flowchart of the "sorted_goVirt" script)
 - test_sytems/ (directory containing example test system files)

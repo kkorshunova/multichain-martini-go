@@ -30,11 +30,11 @@ def itp_sections(x):  # helper function used to slice input itp into sections (c
 def user_input():
     parser = argparse.ArgumentParser()
     parser.add_argument('-s', help='File containing the coarse-grained structure of the protein in pdb format.')
-    parser.add_argument('-f', help='File containing the contact analysis of the (atomistic) protein structure obtained from the webserver http://info.ifpan.edu.pl/~rcsu/rcsu/index.html.')
     parser.add_argument('-i', help='File containing the topology of coarse-grained protein in itp format.')
+    parser.add_argument('-f', help='File containing the contact analysis of the (atomistic) protein structure.')
     parser.add_argument('--nb', help='File containing martini_go.ff in itp format.')
     parser.add_argument('--moltype', default='mol',
-                        help='Molecule name used as prefix in your output file names and the virtual bead names (default: mol). If you will combine your Go-like model with a coarse-grained protein generated with martinize2, you must use the same name as specified with the --govs-moltype flag of martinize2!')
+                        help='String used as prefix in atomtypes of virtual sites, as well as in output file names (default: mol)')
     parser.add_argument('--go_eps_inter', type=float, default=9.414,
                         help='Dissociation energy [kJ/mol] of the Lennard-Jones potential used in the Go-like model (default: 9.414).')
     parser.add_argument('--go_eps_intra', type=float, default=9.414,
@@ -45,10 +45,10 @@ def user_input():
                         help='Upper cutoff distance [nm]: contacts with a longer distance than cutoff_long are not included in the Go-like interactions (default: 1.1).')
     parser.add_argument('--missres', type=int, default=0,
                         help='Number of missing residues at the beginning of the atomistic pdb structure which is needed if the numbering of the coarse-grained structure starts at 1 (default: 0).')
+    parser.add_argument('--chain_sort', type=int, default=0,
+                        help='Chain sorting method: 0 = distance-based (default), 1 = pdb chain-ID based, 2 = user input based (provide txt file using --chain_file flag)')
     parser.add_argument('--bb_cutoff', type=int, default=10,
                         help='Max distance (in A) allowed between next-neighbor BBs (default: 10 A).')
-    parser.add_argument('--chain_sort', type=int, default=0,
-                        help='Chain sorting method: 0 = distance-based (default), 1 = pdb chain-ID based, 2 = user input based (provide txt file with comma-separated residue numbers)')
     parser.add_argument('--chain_file', help='File containing chain IDs (one per line; same order as input CG PDB)')
     args = parser.parse_args()
     return args

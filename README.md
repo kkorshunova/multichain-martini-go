@@ -5,16 +5,16 @@ This script is the generalization of the Martini-Go scheme (originally developed
 New features include:
  - *inter*molecular and *intra*molecular Go-bonds are clearly distinguished, with two separate $\varepsilon$-values defined by the user
  - separation of Go-bonds is realized via the combination of multiple virtual site (VS) and exclusion groups
- - flexible chain-identification procedure
+ - flexible chain identification procedure
 
 ## Repository content:
 - `sorted_goVirt.py`: the script
 - `martini_v3.0.0_go.itp`: modified martini force field to be used with the script
-- `docs/`: directory containing the flowchart of the "sorted_goVirt" script (to be updated)
+- `docs/`: directory containing documentation
 - `test_sytems/`: directory containing example test system files (to be updated)
 
 ## How it works:
-- the script requires no installation, simply change file permissions (e.g.: `chmod u+x`)
+- the script requires no installation: simply change file permissions to make it executable (e.g.: `chmod u+x`)
 - required Python packages:
   - argparse
   - numpy
@@ -50,16 +50,20 @@ New features include:
 ### Output files:
 - `mol_go.top` main system topology file 
 - `mol_go.itp` main include topology file
-All auxiliary itp file names follow the same convention: prefix (defined in `--moltype`) + itp section name + `go`
+
+All auxiliary itp file names follow the same convention: prefix (defined via `--moltype`) + itp section name + `go`
 - `mol_atomtypes_go.itp`, `atomtypes_go.itp` list of VS atomtype definitions + wrapper itp file
 - `mol_nonbond_params_go.itp`, `nonbond_params_go.itp` list of VS nonbonded interaction parameters + wrapper itp file
 - `mol_atoms_go.itp`
 - `mol_virtual_sitesn_go.itp`
 - `mol_exclusions_go.itp`
 - \* `mol_viz_go.itp` (for visualization purposes only, not used in the main topology)
+
+For the organization of the output files, refer to this [flowchart](https://github.com/kkorshunova/multichain-martini-go/blob/master/docs/MGo_top_A1.pdf).
+
 ### How to choose a suitable chain sorting method:
- - identification of separate chains in the input protein structure can be done in three ways:
-   1. if structure isn't missing residues: automatic, distance-based detection
-   2. if input pdb has correct chain-ID records: read from pdb
-   3. catch-all option: user-defined chain-ID supplied in a separate, single-column plain text file (one entry per line, same order as in the input structure pdb, N(lines)=N(ATOM records)) 
+Identification of separate chains in the input protein structure can be done in three ways:
+ 1. if structure isn't missing residues: automatic, distance-based detection
+ 2. if input pdb has correct chain-ID records: read from pdb
+ 3. catch-all option: user-defined chain-ID supplied in a separate, single-column plain text file (one entry per line, same order as in the input structure pdb, N(lines)=N(ATOM records)) 
 

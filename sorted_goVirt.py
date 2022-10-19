@@ -4,7 +4,6 @@ import argparse
 import numpy as np
 import math
 import re
-
 import pandas as pd  # needed for get_bb_pair_sigma_epsilon()
 import itertools  # needed for write_main_top()
 
@@ -21,10 +20,12 @@ fnames = ['atomtypes_go.itp',
           'exclusions_go.itp',
           'viz_go.itp']
 
+
 def itp_sections(x):  # helper function used to slice input itp into sections (called in write_main_top())
     if x.startswith('[ '):
         itp_sections.count += 1
     return itp_sections.count
+
 
 ##################### FUNCTIONS #####################
 def user_input():
@@ -34,19 +35,26 @@ def user_input():
     parser.add_argument('-f', help='File containing the contact analysis of the (atomistic) protein structure.')
     parser.add_argument('--nb', help='File containing martini_go.ff in itp format.')
     parser.add_argument('--moltype', default='mol',
-                        help='String used as prefix in atomtypes of virtual sites, as well as in output file names (default: mol)')
+                        help='String used as prefix in atomtypes of virtual sites, as well as in output file names '
+                             '(default: mol)')
     parser.add_argument('--go_eps_inter', type=float, default=9.414,
-                        help='Dissociation energy [kJ/mol] of the Lennard-Jones potential used in the Go-like model (default: 9.414).')
+                        help='Dissociation energy [kJ/mol] of the Lennard-Jones potential used in the Go-like model '
+                             '(default: 9.414).')
     parser.add_argument('--go_eps_intra', type=float, default=9.414,
-                        help='Dissociation energy [kJ/mol] of the Lennard-Jones potential used in the Go-like model (default: 9.414).')
+                        help='Dissociation energy [kJ/mol] of the Lennard-Jones potential used in the Go-like model '
+                             '(default: 9.414).')
     parser.add_argument('--cutoff_short', type=float, default=0.3,
-                        help='Lower cutoff distance [nm]: contacts with a shorter distance than cutoff_short are not included in the Go-like interactions (default: 0.3).')
+                        help='Lower cutoff distance [nm]: contacts with a shorter distance than cutoff_short are not '
+                             'included in the Go-like interactions (default: 0.3).')
     parser.add_argument('--cutoff_long', type=float, default=1.1,
-                        help='Upper cutoff distance [nm]: contacts with a longer distance than cutoff_long are not included in the Go-like interactions (default: 1.1).')
+                        help='Upper cutoff distance [nm]: contacts with a longer distance than cutoff_long are not '
+                             'included in the Go-like interactions (default: 1.1).')
     parser.add_argument('--missres', type=int, default=0,
-                        help='Number of missing residues at the beginning of the atomistic pdb structure which is needed if the numbering of the coarse-grained structure starts at 1 (default: 0).')
+                        help='Number of missing residues at the beginning of the atomistic pdb structure which is '
+                             'needed if the numbering of the coarse-grained structure starts at 1 (default: 0).')
     parser.add_argument('--chain_sort', type=int, default=0,
-                        help='Chain sorting method: 0 = distance-based (default), 1 = pdb chain-ID based, 2 = user input based (provide txt file using --chain_file flag)')
+                        help='Chain sorting method: 0 = distance-based (default), 1 = pdb chain-ID based, '
+                             '2 = user input based (provide txt file using --chain_file flag)')
     parser.add_argument('--bb_cutoff', type=int, default=10,
                         help='Max distance (in A) allowed between next-neighbor BBs (default: 10 A).')
     parser.add_argument('--chain_file', help='File containing chain IDs (one per line; same order as input CG PDB)')
@@ -54,8 +62,8 @@ def user_input():
     return args
 
 
-# read_data() parses data from the .map file (output of the rCSU server), stores it in temporary files
-# returns lists: indBB (list of xyz coords of BB), map_OVrCSU (list: resID resID distance...), pdb_data
+# read_data() parses data from the .map file (output of the rCSU server)
+# returns: indBB (list of xyz coords of BB), map_OVrCSU (list: resID resID distance...), pdb_data, pdb_chain_ids
 def read_data(cg_pdb, file_contacts):
     # read the pdb file: mind the fixed file format!
     pdb_data = [ ]
@@ -164,7 +172,7 @@ def assign_chain_ids(pdb_data, bb_cutoff, pdb_chain_ids, chain_sort_method, chai
         # set the cutoff distance
         max_dist = pow(bb_cutoff, 2)  # (squared, A) distance between two consecutive residues in backbone
         # compute squared distances between sequential BBs
-        # input: system_pdb_data (2d list), output: new_chain_begins (1d list)
+        # input: system_BB_only (2d list), output: new_chain_begins (1d list)
         # calculate squared distances and create an index list of chain beginnings:
         for index, line in enumerate(system_BB_only):
             if index+1 < len(system_BB_only):  # if-clause prevents going out of range for the last BB pair
@@ -174,10 +182,11 @@ def assign_chain_ids(pdb_data, bb_cutoff, pdb_chain_ids, chain_sort_method, chai
                        + math.pow((system_BB_only[index][6] - system_BB_only[index+1][6]), 2)
                 if dist > max_dist:
                     new_chain_begins.append(system_BB_only[index+1][0])
+        print(len(pdb_data), new_chain_begins)
         # assign the IDs based on the indices of chain "heads"
         chain_flag = 0  # this variable will change as script progresses down the list of residues
         current_switch = new_chain_begins.pop(0)
-        for line in system_pdb_data:
+        for line in pdb_data:
             if line[0] == current_switch:
                 chain_flag += 1
                 if new_chain_begins:  # avoid popping an empty list: if only 1 element in list, this step is omitted
@@ -186,8 +195,8 @@ def assign_chain_ids(pdb_data, bb_cutoff, pdb_chain_ids, chain_sort_method, chai
     # PDB-ID based method
     elif chain_sort_method == 1:  # chain-ID based approach
         # insert pdb_chain_ids into the last column:
-        for ndx in range(len(system_pdb_data)):
-            system_pdb_data[ndx][-1] = pdb_chain_ids[ndx]  # these are now strings
+        for ndx in range(len(pdb_data)):
+            pdb_data[ndx][-1] = pdb_chain_ids[ndx]  # these are now strings
     # User input based method
     elif chain_sort_method == 2:
         # insert user input ids into the last column:
@@ -195,20 +204,20 @@ def assign_chain_ids(pdb_data, bb_cutoff, pdb_chain_ids, chain_sort_method, chai
         with open(chain_file, 'r') as f:
             for counter, line in enumerate(f):
                 pass
-        if counter + 1 != len(system_pdb_data):
+        if counter + 1 != len(pdb_data):
             exit(
                 "Error: Number of lines in {} file ({}) is not consistent with the number of ATOM records in input pdb ({})"
-                .format(chain_file, counter + 1, len(system_pdb_data)))
+                .format(chain_file, counter + 1, len(pdb_data)))
         # step 2: open the file again and store the entries in a list:
         userinput_ids = [ ]
         with open(chain_file, 'r') as f:
             for line in f:
                 userinput_ids.append(line.strip())
         # step 3: insert chain ids into the pdb_data
-        for ndx in range(len(system_pdb_data)):
-            system_pdb_data[ndx][-1] = userinput_ids[ndx]
-    return system_pdb_data
+        for ndx in range(len(pdb_data)):
+            pdb_data[ndx][-1] = userinput_ids[ndx]
 
+    return pdb_data
 
 # sym_pair_sort() separates sym_pairs into sym_pairs_intra and sym_pairs_inter based on the output of out_pdb
 # function input parameters: sym_pairs, out_pdb

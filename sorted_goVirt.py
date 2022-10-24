@@ -182,7 +182,7 @@ def assign_chain_ids(pdb_data, bb_cutoff, pdb_chain_ids, chain_sort_method, chai
                        + math.pow((system_BB_only[index][6] - system_BB_only[index+1][6]), 2)
                 if dist > max_dist:
                     new_chain_begins.append(system_BB_only[index+1][0])
-        print(len(pdb_data), new_chain_begins)
+        #print(len(pdb_data), new_chain_begins)
         # assign the IDs based on the indices of chain "heads"
         chain_flag = 0  # this variable will change as script progresses down the list of residues
         current_switch = new_chain_begins.pop(0)

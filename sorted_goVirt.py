@@ -11,6 +11,8 @@ import itertools  # needed for write_main_top()
 seqDist = 4  # minimal distance in the sequence to add a elastic bond (ElNedyn=3 [Perriole2009]; Go=4 [Poma2017])
 # (this has to result in the correct atom number when added to "k_at" compared to the .itp file)
 c6c12 = 0  # if set to 1, the C6 and C12 term are expected in the .itp file; if set to 0, sigma and go_eps are used
+mod_enabled = True  # %TODO this is a test feature!!
+debug_mode = True
 
 # names of the output included itp files:
 fnames = ['atomtypes_go.itp',
@@ -156,6 +158,10 @@ def get_go(indBB, map_OVrCSU, cutoff_short, cutoff_long, go_eps_intra, seqDist, 
             for l in range(k+1, len(pairs)):
                 if (pairs[l][0] == pairs[k][1]) and (pairs[l][1] == pairs[k][0]):
                     sym_pairs.append(pairs[k])
+    if debug_mode:
+        # for line in sym_pairs:
+        #     print(line)
+        print("Total number of Go-bonds extracted from the map file: " + str(len(sym_pairs)))
 
     return sym_pairs
 
@@ -182,7 +188,6 @@ def assign_chain_ids(pdb_data, bb_cutoff, pdb_chain_ids, chain_sort_method, chai
                        + math.pow((system_BB_only[index][6] - system_BB_only[index+1][6]), 2)
                 if dist > max_dist:
                     new_chain_begins.append(system_BB_only[index+1][0])
-        #print(len(pdb_data), new_chain_begins)
         # assign the IDs based on the indices of chain "heads"
         chain_flag = 0  # this variable will change as script progresses down the list of residues
         current_switch = new_chain_begins.pop(0)
@@ -192,11 +197,13 @@ def assign_chain_ids(pdb_data, bb_cutoff, pdb_chain_ids, chain_sort_method, chai
                 if new_chain_begins:  # avoid popping an empty list: if only 1 element in list, this step is omitted
                     current_switch = new_chain_begins.pop(0)
             line[-1] = chain_flag
+
     # PDB-ID based method
     elif chain_sort_method == 1:  # chain-ID based approach
         # insert pdb_chain_ids into the last column:
         for ndx in range(len(pdb_data)):
             pdb_data[ndx][-1] = pdb_chain_ids[ndx]  # these are now strings
+
     # User input based method
     elif chain_sort_method == 2:
         # insert user input ids into the last column:
@@ -205,9 +212,8 @@ def assign_chain_ids(pdb_data, bb_cutoff, pdb_chain_ids, chain_sort_method, chai
             for counter, line in enumerate(f):
                 pass
         if counter + 1 != len(pdb_data):
-            exit(
-                "Error: Number of lines in {} file ({}) is not consistent with the number of ATOM records in input pdb ({})"
-                .format(chain_file, counter + 1, len(pdb_data)))
+            exit("Error: Number of lines in {} file ({}) is not consistent with the number of "
+                 "ATOM records in input pdb ({})".format(chain_file, counter + 1, len(pdb_data)))
         # step 2: open the file again and store the entries in a list:
         userinput_ids = [ ]
         with open(chain_file, 'r') as f:
@@ -217,14 +223,27 @@ def assign_chain_ids(pdb_data, bb_cutoff, pdb_chain_ids, chain_sort_method, chai
         for ndx in range(len(pdb_data)):
             pdb_data[ndx][-1] = userinput_ids[ndx]
 
-    return pdb_data
+    # count the length of the first chain in atoms and residues:
+    first_id = pdb_data[0][-1]
+    chain_ids = []  # one column of a 2d array (pdb_data) is more accessible on its own
+    for line in pdb_data:
+        chain_ids.append(line[-1])
+    chain_length = chain_ids.count(first_id)  # counted the occurrences of the fist id only
+    # put single chain length (in atoms and residues) in one array for later use:
+    single_chain_mods = [chain_length, pdb_data[chain_length-1][3]]
+    if debug_mode:
+        print("Length of 1st chain in atoms = " + str(single_chain_mods[0]))
+        print("Length of 1st chain in residues = " + str(single_chain_mods[1]))
+
+    return pdb_data, single_chain_mods
+
 
 # sym_pair_sort() separates sym_pairs into sym_pairs_intra and sym_pairs_inter based on the output of out_pdb
 # function input parameters: sym_pairs, out_pdb
 # function output: sym_pairs_intra, sym_pairs_inter
 # Q: separate intras further chain-wise - needed or not?
 # different epsilon entries: taken from the script input (--go_eps_intra, --go_eps_inter)
-def sym_pair_sort(sym_pairs, out_pdb):
+def sym_pair_sort(sym_pairs, out_pdb, single_chain_mods):
     sym_pairs_intra = [ ]
     sym_pairs_inter = [ ]
     for index, pair in enumerate(sym_pairs):
@@ -234,6 +253,36 @@ def sym_pair_sort(sym_pairs, out_pdb):
             sym_pairs_intra.append(pair)
         else:
             sym_pairs_inter.append(pair)
+    if mod_enabled:  # edit sym_pairs_inter and intra by shortening them, otherwise skip
+        # INTRA: take only pairs from the 1st chain, i.e. atom_ids < chain length:
+        mono_intra = []
+        for i in range(len(sym_pairs_intra)):
+            if sym_pairs_intra[i][0] <= single_chain_mods[0]:  # 2nd half of the pair will be in the same chain by def
+                mono_intra.append(sym_pairs_intra[i])
+        sym_pairs_intra = mono_intra
+        # INTER: filter pairs involving chain 1, then recalculate indices using mod to fit in one chain range
+        mono_inter = []
+        for pair in sym_pairs_inter:
+            if (pair[0] <= single_chain_mods[0]) or (pair[1] <= single_chain_mods[0]):
+                mono_inter.append([pair[0] % single_chain_mods[0], pair[1] % single_chain_mods[0],
+                                   pair[2], pair[3],
+                                   pair[4] % single_chain_mods[1], pair[5] % single_chain_mods[1],
+                                   pair[6], pair[7]])
+        sym_pairs_inter = mono_inter
+        if debug_mode:
+            print("Number of mono INTRA pairs: " + str(len(sym_pairs_intra)))
+            print("Number of mono INTER pairs: " + str(len(sym_pairs_inter)))
+
+    if debug_mode:
+        # print('INTRA pairs')
+        # for line in sym_pairs_intra:
+        #     print(line)
+        # print('INTER pairs')
+        # for line in sym_pairs_inter:
+        #     print(line)
+        print("Number of INTRA pairs: " + str(len(sym_pairs_intra)))
+        print("Number of INTER pairs: " + str(len(sym_pairs_inter)))
+
     # write the residue numbers for intra sites A,B and inter sites C,D
     # (this can't be done earlier since the intra-inter sorting happens in this function)
     resnr_intra = [ ]
@@ -248,12 +297,7 @@ def sym_pair_sort(sym_pairs, out_pdb):
         resnr_inter.append(line[5])
     resnr_inter = list(set(resnr_inter))
     resnr_inter.sort()
-    # print('INTRA pairs')
-    # for line in sym_pairs_intra:
-    #     print(line)
-    # print('INTER pairs')
-    # for line in sym_pairs_inter:
-    #     print(line)
+
     return sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter
 
 
@@ -264,6 +308,15 @@ def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter):
     # starting atomnr: last index in out_pdb+1:
     atomnr = out_pdb[-1][0]
     upd_out_pdb = out_pdb.copy()
+
+    if mod_enabled:  # pdb with just the 1st of the N identical chains
+        mono_pdb = []
+        chain_id = out_pdb[0][-1]  # first chain-ID
+        for line in out_pdb:
+            if line[-1] == chain_id:
+                mono_pdb.append(line)
+        upd_out_pdb = mono_pdb
+
     # for exclusions: additional structs for later:
     vwb_excl = []
     vwc_excl = []
@@ -319,9 +372,6 @@ def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter):
                 upd_out_pdb.append([atomnr, 'VWD', resname, k, x, y, z, ch_id])
                 virtual_sites.append([atomnr, line[0]])
                 vwd_excl.append([k, atomnr])  # dict: key=resnr : val=atomnr
-    #print(resnr_intra)
-    #for line in vwb_excl:
-    #    print(line)
 
     # write an updated pdb file:
     with open(file_pref + '_cg_go.pdb', 'w') as f:
@@ -330,24 +380,6 @@ def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter):
                                                                         line[4], line[5], line[6])
             f.write(s2print)
         f.write('END   ')
-
-    sep_pdbs = False  # this feature allows for writing separate pdb files for each chain (not used currently)
-    if sep_pdbs:
-        # get unique chain ids:
-        unique_ids = [ ]
-        for line in out_pdb:
-            if line[7] not in unique_ids:
-                unique_ids.append(line[7])
-        # separate upd_out_pdb:
-        for id in unique_ids:
-            #print(id)
-            with open(file_pref + '_' + id + '_cg_go.pdb', 'w') as f:
-                for line in upd_out_pdb:
-                    if line[-1] == id:
-                        s2print = "ATOM  %5d %-4s %3s  %4d    %8.3f%8.3f%8.3f  1.00  0.00\n" % (line[0], line[1], line[2], line[3],
-                                                                            line[4], line[5], line[6])
-                        f.write(s2print)
-                f.write('END   ')
 
     return vwb_excl, vwc_excl, vwd_excl, virtual_sites, upd_out_pdb
 
@@ -396,7 +428,7 @@ def get_bb_pair_sigma_epsilon(itp_filename, martini_file, sym_pairs_inter):
             if re.search(r'\[ atoms ]', line):
                 match = True
                 continue
-            elif re.search(r'\[ position_restraints ]', line): # or line == '\n'
+            elif re.search(r'\[ position_restraints ]', line):  #todo: or line == '\n' - if sections are in different order
                 match = False
                 continue
             elif match:
@@ -703,9 +735,9 @@ indBB, map_OVrCSU, system_pdb_data, pdb_chain_ids = read_data(args.s, args.f)
 sym_pairs = get_go(indBB, map_OVrCSU, args.cutoff_short, args.cutoff_long, args.go_eps_intra, seqDist, args.missres)
 
 # sort Go pairs into intra and inter sub-lists:
-out_pdb = assign_chain_ids(system_pdb_data, args.bb_cutoff, pdb_chain_ids, args.chain_sort, args.chain_file)
+out_pdb, single_chain_mods = assign_chain_ids(system_pdb_data, args.bb_cutoff, pdb_chain_ids, args.chain_sort, args.chain_file)
 # group sym_pairs into intra and inter based on their chain IDs
-sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter = sym_pair_sort(sym_pairs, out_pdb)
+sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter = sym_pair_sort(sym_pairs, out_pdb, single_chain_mods)
 # retrieve sigma-epsilon values for each BB involved in intra-Go bonds (for D virtual sites)
 sigma_d, eps_d = get_bb_pair_sigma_epsilon(args.i, args.nb, sym_pairs_inter)
 

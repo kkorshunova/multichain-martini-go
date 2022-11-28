@@ -15,12 +15,24 @@ mod_enabled = True  # %TODO this is a test feature!!
 debug_mode = True
 
 # names of the output included itp files:
-fnames = ['atomtypes_go.itp',
-          'nonbond_params_go.itp',
-          'atoms_go.itp',
-          'virtual_sitesn_go.itp',
-          'exclusions_go.itp',
-          'viz_go.itp']
+if mod_enabled:
+    fnames = ['atomtypes_go_mono.itp',
+              'nonbond_params_go_mono.itp',
+              'atoms_go_mono.itp',
+              'virtual_sitesn_go_mono.itp',
+              'exclusions_go_mono.itp',
+              'viz_go_mono.itp',
+              'go_mono.itp',
+              'go_mono.top']
+else:
+    fnames = ['atomtypes_go.itp',
+              'nonbond_params_go.itp',
+              'atoms_go.itp',
+              'virtual_sitesn_go.itp',
+              'exclusions_go.itp',
+              'viz_go.itp',
+              'go.itp',
+              'go.top']
 
 
 def itp_sections(x):  # helper function used to slice input itp into sections (called in write_main_top())
@@ -682,24 +694,143 @@ def write_main_top_files(file_pref, molecule_itp, fnames):
     # find missing headers:
     missing_headers = list(set(itp_go_sections) - set(input_itp_headers))
     # write out the (modified) itp file
-    with open(file_pref + '_go.itp', 'w') as f:
+    with open(file_pref + '_' + fnames[6], 'w') as f:
         for section in itp_file:
             if 'moleculetype' in section[0]:  # rewrite this section entirely with the right molecule name
                 f.write(section[0])
                 f.write(file_pref + '    1\n\n')
             elif 'atoms' in section[0]:  # how to filter for sections that will be expanded
-                for line in section:
-                    f.write(line)
+                if mod_enabled:  # only write the first N lines of section (N=atoms in 1st chain)
+                    for ndx in range(single_chain_mods[0]+1):
+                        f.write(section[ndx])
+                else:            # otherwise, write the entire section as in the input itp
+                    for line in section:
+                        f.write(line)
+                # add the "include" line with the VS list:
                 f.write('#include "' + file_pref + '_' + fnames[2] + '"\n\n')
             elif 'virtual_sitesn' in section[0]:  # check if the input itp already contains the VS section
-                for line in section:
-                    f.write(line)
+                if mod_enabled:  # only write lines with indices from 1st chain
+                    for line in section:
+                        if not (line.startswith('[') or line.startswith(';') or line.startswith('\n') or line.startswith('#')):
+                            line = line.split()
+                            line = [ int(ndx) for ndx in line]  # turn each element in list line into int
+                            # unless any of the ints > N atoms in one chain (line[1] is func=2, safe to assume is true):
+                            if not any(ndx > single_chain_mods[0] for ndx in line):
+                                # number of indices on each may vary, use simpler formatting:
+                                line = [str(ndx) for ndx in line]  # turn them back into strings...
+                                f.write('  '.join(line) + '\n')     # ...and write to file
+
+                        else:
+                            f.write(line)
+                else:            # if mod_enabled=False, write all lines of the section as in the input itp
+                    for line in section:
+                        f.write(line)
                 f.write('#include "' + file_pref + '_' + fnames[3] + '"\n\n')  # [ virtual_sitesn ]
             elif 'exclusions' in section[0]:
-                for line in section:
-                    f.write(line)
+                if mod_enabled:
+                    for line in section:
+                        if not (line.startswith('[') or line.startswith(';') or line.startswith('\n') or line.startswith('#')):
+                            line = line.split()
+                            line = [ int(ndx) for ndx in line]  # turn each element in list line into int
+                            # unless any of the ints > N atoms in one chain:
+                            if not any(ndx > single_chain_mods[0] for ndx in line):
+                                # number of indices on each line varies, use simpler formatting:
+                                line = [str(ndx) for ndx in line]  # turn them back into strings...
+                                f.write('  '.join(line) + '\n')    # ...and write to file
+                        else:
+                            f.write(line)
+                else:
+                    for line in section:
+                        f.write(line)
                 f.write('#include "' + file_pref + '_' + fnames[4] + '"\n\n')
-            else:
+            # now for the sections that only need to be shortened for the single-chain output:
+            elif mod_enabled and 'position_restraints' in section[0]:
+                for line in section:
+                    if not (line.startswith('[') or line.startswith(';') or line.startswith('\n') or line.startswith('#')):
+                        line = line.split()
+                        # posres: 0=index, 1=functype (1), 2,3,4= x,y,z constants
+                        line = [ int(ndx) for ndx in line]
+                        if not line[0] > single_chain_mods[0]:
+                            s2print = '%d  %d  %d  %d  %d\n' % (line[0], line[1], line[2], line[3], line[4])
+                            f.write(s2print)
+                    else:
+                        f.write(line)
+            elif mod_enabled and 'bonds' in section[0]:
+                for line in section:
+                    if not (line.startswith('[') or line.startswith(';') or line.startswith('\n') or line.startswith('#')):
+                        line = line.split()
+                        # bonds: 0,1=indices, 2=functype (1), 3,4=bond, const
+                        line = [int(line[0]), int(line[1]), int(line[2]), float(line[3]), int(line[4])]
+                        if not (line[0] > single_chain_mods[0] or line[1] > single_chain_mods[0]):
+                            s2print = '%d  %d  %d  %.3f %d\n' % (line[0], line[1], line[2], line[3], line[4])
+                            f.write(s2print)
+                    else:
+                        f.write(line)
+            elif mod_enabled and 'constraints' in section[0]:
+                for line in section:
+                    if not (line.startswith('[') or line.startswith(';') or line.startswith('\n') or line.startswith('#')):
+                        line = line.split()
+                        # constraints: 0,1=indices, 2=functype (1), 3=dist
+                        line = [int(line[0]), int(line[1]), int(line[2]), float(line[3])]
+                        if not (line[0] > single_chain_mods[0] or line[1] > single_chain_mods[0]):
+                            s2print = '%d  %d  %d  %.3f\n' % (line[0], line[1], line[2], line[3])
+                            f.write(s2print)
+                    else:
+                        f.write(line)
+            elif mod_enabled and 'angles' in section[0]:
+                for line in section:
+                    if not (line.startswith('[') or line.startswith(';') or line.startswith('\n') or line.startswith('#')):
+                        if any(x == ';' for x in line):
+                            line = line.split(';')
+                            line = line[0].split()  # now the output won't include in-line comments
+                        else:
+                            line = line.split()
+                        # angles: 0-2=indices, 3=functype (2:G96, 10: restricted bending), 4,5 = angle, const
+                        line = [int(line[0]), int(line[1]), int(line[2]), int(line[3]), float(line[4]), float(line[5])]
+                        if not (line[0] > single_chain_mods[0] or line[1] > single_chain_mods[0]
+                                or line[2] > single_chain_mods[0]):
+                            s2print = '%d  %d  %d  %d  %.2f  %.1f\n' % (line[0], line[1], line[2], line[3], line[4], line[5])
+                            f.write(s2print)
+                    else:
+                        f.write(line)
+            elif mod_enabled and 'dihedrals' in section[0]:  # both proper and improper dihedrals are processed here
+                for line in section:
+                    if not (line.startswith('[') or line.startswith(';') or line.startswith('\n') or line.startswith('#')):
+                        # if line contains a comment: remove comment
+                        if any(x == ';' for x in line):
+                            line = line.split(';')
+                            line = line[0].split()
+                        else:
+                            line = line.split()
+                        # proper dihedrals: 0-3=indices, 4=functype (1), 5,6,7 = angle, const, multiplicity
+                        # improper dihedrals: 0-3=indices, 4=functype (2), 5,6 = angle, const
+                        if line[4] == '1':  # proper dihedral
+                            line = [int(line[0]), int(line[1]), int(line[2]), int(line[3]), int(line[4]),
+                                    float(line[5]), float(line[6]), int(line[7])]
+                            # filter indices for the first chain only:
+                            if not (line[0] > single_chain_mods[0] or line[1] > single_chain_mods[0]
+                                    or line[2] > single_chain_mods[0] or line[3] > single_chain_mods[0]):
+                                # omit "pretty" formatting to allow more flexibility
+                                s2print = '%d  %d  %d  %d  %d  %.2f  %.2f  %d\n' % (
+                                    line[0], line[1], line[2], line[3], line[4], line[5], line[6], line[7]
+                                )
+                                f.write(s2print)
+                        elif line[4] == '2':  # improper dihedral
+                            line = [int(line[0]), int(line[1]), int(line[2]), int(line[3]), int(line[4]),
+                                    float(line[5]), float(line[6])]
+                            # filter indices for the first chain only:
+                            if not (line[0] > single_chain_mods[0] or line[1] > single_chain_mods[0]
+                                    or line[2] > single_chain_mods[0] or line[3] > single_chain_mods[0]):
+                                s2print = '%d  %d  %d  %d  %d  %.2f  %.2f\n' % (
+                                    line[0], line[1], line[2], line[3], line[4], line[5], line[6]
+                                )
+                                f.write(s2print)
+                        else:
+                            continue  # something went wrong with formatting, skip this line
+
+                    else:
+                        f.write(line)
+            else:  # catch-all for the rest of the text in itp
                 for line in section:
                     f.write(line)
     # if there are missing sections, include them at the end:
@@ -718,10 +849,10 @@ def write_main_top_files(file_pref, molecule_itp, fnames):
                 f.write('#include "' + file_pref + '_' + fnames[4] + '"\n')
 
     # write updated .top file from scratch:
-    with open(file_pref+'_go.top', 'w') as f:
+    with open(file_pref+ '_' + fnames[7], 'w') as f:
         f.write('#define GO_VIRT\n')
         f.write('#include "martini_v3.0.0_go.itp"\n')
-        f.write('#include "' + file_pref + '_go.itp"\n\n')
+        f.write('#include "' + file_pref + '_' + fnames[6] + '"\n\n')
         f.write('[ system ]\n'+ file_pref + ' complex with Go bonds\n\n')
         f.write('[ molecules ]\n' + file_pref + '     1 \n') # check if 1 can be a variable
 

@@ -274,18 +274,21 @@ def sym_pair_sort(sym_pairs, out_pdb, single_chain_mods):
         sym_pairs_intra = mono_intra
         # INTER: filter pairs involving chain 1, then recalculate indices using mod to fit in one chain range
         mono_inter = []
+        unique_sigmas = []  # temp array to store a unique sigma value (impromptu dictionary key)
         for pair in sym_pairs_inter:
             if (pair[0] <= single_chain_mods[0]) or (pair[1] <= single_chain_mods[0]):
-                mono_inter.append([pair[0] % single_chain_mods[0], pair[1] % single_chain_mods[0],
-                                   pair[2], pair[3],
-                                   pair[4] % single_chain_mods[1], pair[5] % single_chain_mods[1],
-                                   pair[6], pair[7]])
+                if pair[3] not in unique_sigmas:
+                    unique_sigmas.append(pair[3])
+                    mono_inter.append([pair[0] % single_chain_mods[0], pair[1] % single_chain_mods[0],
+                                       pair[2], pair[3],
+                                       pair[4] % single_chain_mods[1], pair[5] % single_chain_mods[1],
+                                       pair[6], pair[7]])
         sym_pairs_inter = mono_inter
         if debug_mode:
             print("Number of mono INTRA pairs: " + str(len(sym_pairs_intra)))
             print("Number of mono INTER pairs: " + str(len(sym_pairs_inter)))
 
-    if debug_mode:
+    if debug_mode and not mod_enabled:
         # print('INTRA pairs')
         # for line in sym_pairs_intra:
         #     print(line)

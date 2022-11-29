@@ -320,8 +320,12 @@ def sym_pair_sort(sym_pairs, out_pdb, single_chain_mods):
 # input: system_pdb_data
 # output: updated pdb file (implicitly), exclusions, virtual sites mapping
 def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter):
-    # starting atomnr: last index in out_pdb+1:
-    atomnr = out_pdb[-1][0]
+    # starting atomnr: last index in out_pdb+1 OR last index of a signle chain (mono)
+    if mod_enabled:
+        atomnr = single_chain_mods[0]
+    else:
+        atomnr = out_pdb[-1][0]
+
     upd_out_pdb = out_pdb.copy()
 
     if mod_enabled:  # pdb with just the 1st of the N identical chains
@@ -389,7 +393,11 @@ def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter):
                 vwd_excl.append([k, atomnr])  # dict: key=resnr : val=atomnr
 
     # write an updated pdb file:
-    with open(file_pref + '_cg_go.pdb', 'w') as f:
+    if mod_enabled:
+        pdb_name = '_cg_go_mono.pdb'
+    else:
+        pdb_name = '_cg_go.pdb'
+    with open(file_pref + pdb_name, 'w') as f:
         for line in upd_out_pdb:
             s2print = "ATOM  %5d %-4s %3s  %4d    %8.3f%8.3f%8.3f  1.00  0.00\n" % (line[0], line[1], line[2], line[3],
                                                                         line[4], line[5], line[6])
@@ -552,7 +560,7 @@ def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,
                 file_pref, str(j + missRes))  # residue index adapted due to missing residues
             f.write(s2print)
     # add the name of the created .itp file into the wrapper atomtypes_go.itp
-    with open(fnames[0], 'w') as f:
+    with open('atomtypes_go.itp', 'w') as f:  # this filename doesn't change, unless it changes in martini_v3.0.0_go.itp
         s2print = '#include "%s_%s"\n' % (file_pref, fnames[0])
         f.write(s2print)
 
@@ -612,7 +620,7 @@ def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,
                                                                                       sym_pairs_inter[k][6])
                 f.write(s2print)
     # add the name of the created .itp file into the wrapper go-table_VirtGoSites.itp
-    with open(fnames[1],'w') as f:  # this itp name file was written by martinize2
+    with open('nonbond_params_go.itp','w') as f:  # this filename doesn't change, unless it changes in martini_v3.0.0_go.itp
         s2print = '#include "%s_%s"\n' % (file_pref, fnames[1])
         f.write(s2print)
 

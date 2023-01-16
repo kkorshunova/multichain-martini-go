@@ -110,7 +110,7 @@ def read_data(cg_pdb, file_contacts):
                 continue  # skips irrelevant lines (e.g. CONECT if it's present in file)
     indBB = np.array(indBB)
 
-    # read the map file
+    # read the map file.
     map_OVrCSU = [] # instead of shell calls (og ver)
     with open(file_contacts, 'r') as f:
         for line in f:

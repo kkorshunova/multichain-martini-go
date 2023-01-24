@@ -141,7 +141,7 @@ def get_go(indBB, map_OVrCSU, cutoff_short, cutoff_long, go_eps_intra, seqDist, 
             Wii = 4.0 * pow(sigma,12) * go_eps_intra
             pairs.append([ int(indBB[ int(map_OVrCSU[k][0])-missRes-1 ,0]),  # atomnr BB_i
                            int(indBB[ int(map_OVrCSU[k][1])-missRes-1 ,0]),  # atomnr BB_j
-                           Vii, Wii,                                         # sigma, eps from map data (not used)
+                           Vii, Wii,                                         # TODO sigma, eps from map data (can be replaced with custom unsorted data)
                            int(map_OVrCSU[k][0]),                            # resnr BB_i
                            int(map_OVrCSU[k][1]),                            # resnr BB_j
                            map_OVrCSU[k][2],                                 # distance
@@ -248,13 +248,28 @@ def sym_pair_sort(sym_pairs, out_pdb):
         resnr_inter.append(line[5])
     resnr_inter = list(set(resnr_inter))
     resnr_inter.sort()
-    # print('INTRA pairs')
+    print('INTRA pairs: ', len(sym_pairs_intra))
     # for line in sym_pairs_intra:
     #     print(line)
-    # print('INTER pairs')
+    print('INTER pairs: ', len(sym_pairs_inter))
     # for line in sym_pairs_inter:
     #     print(line)
     return sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter
+
+
+# read arrays with values for intra and inter epsilon
+# currently: same as scalar go_eps_intra/inter; later: read from file or anywhere else
+# requires knowledge of the amount of inter and intra pairs (=lengths of sym_pairs_intra/inter)
+# for unsorted general array, go to bookmark "epsilon array" aka sym_pairs_intra/inter[k][3]
+def get_eps_array(sym_pairs_intra, sym_pairs_inter, go_eps_intra, go_eps_inter):
+    eps_intra_custom = []
+    eps_inter_custom = []
+    for _ in sym_pairs_intra:
+        eps_intra_custom.append(go_eps_intra)
+    for _ in sym_pairs_inter:
+        eps_inter_custom.append(go_eps_inter)
+    print(len(eps_intra_custom), len(eps_inter_custom))
+    return eps_intra_custom, eps_inter_custom
 
 
 # new pdb file with all relevant particles: CG structure, VS[A-D]
@@ -458,9 +473,9 @@ def get_bb_pair_sigma_epsilon(itp_filename, martini_file, sym_pairs_inter):
 
 
 ########## FILE WRITING PROCEDURES ##########
-def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,
+def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,     #todo: either remove go_eps_intra, go_eps_inter or eps_intra_custom, eps_inter_custom
                 sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs, inter_pairs,
-                        virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d):
+                        virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d, eps_intra_custom, eps_inter_custom):
     # main.top -> martini_v3.0.0_go.itp [ atomtypes ]-> atomtypes_go.itp -> (file_pref)_atomtypes_go.itp
     # here: sets of (file_pref)_[A-D] VSites
     with open(file_pref + '_' + fnames[0], 'w') as f:
@@ -502,7 +517,7 @@ def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,
                                                                                       file_pref,
                                                                                       str(int(sym_pairs_intra[k][5])),
                                                                                       sym_pairs_intra[k][7],
-                                                                                      go_eps_intra,
+                                                                                      eps_intra_custom[k],             # go_eps_intra
                                                                                       str(int(sym_pairs_intra[k][0])),
                                                                                       str(int(sym_pairs_intra[k][1])),
                                                                                       sym_pairs_intra[k][6])
@@ -513,7 +528,7 @@ def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,
                                                                                       file_pref,
                                                                                       str(int(sym_pairs_intra[k][5])),
                                                                                       sym_pairs_intra[k][7],
-                                                                                      -go_eps_intra + 0.00001,  # avoid exact val
+                                                                                      -eps_intra_custom[k] + 0.00001,  # avoid exact val, -go_eps_intra
                                                                                       str(int(sym_pairs_intra[k][0])),
                                                                                       str(int(sym_pairs_intra[k][1])),
                                                                                       sym_pairs_intra[k][6])
@@ -525,7 +540,7 @@ def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,
                                                                                       file_pref,
                                                                                       str(int(sym_pairs_inter[k][5])),
                                                                                       sym_pairs_inter[k][7],
-                                                                                      go_eps_inter,
+                                                                                      eps_inter_custom[k],               # go_eps_inter
                                                                                       str(int(sym_pairs_inter[k][0])),
                                                                                       str(int(sym_pairs_inter[k][1])),
                                                                                       sym_pairs_inter[k][6])
@@ -685,6 +700,8 @@ sym_pairs = get_go(indBB, map_OVrCSU, args.cutoff_short, args.cutoff_long, args.
 out_pdb = assign_chain_ids(system_pdb_data, args.bb_cutoff, pdb_chain_ids, args.chain_sort, args.chain_file)
 # group sym_pairs into intra and inter based on their chain IDs
 sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter = sym_pair_sort(sym_pairs, out_pdb)
+# temporary feature: array of separate inter and intra epsilon values:
+eps_intra_custom, eps_inter_custom = get_eps_array(sym_pairs_intra, sym_pairs_inter, args.go_eps_intra, args.go_eps_inter)
 # retrieve sigma-epsilon values for each BB involved in intra-Go bonds (for D virtual sites)
 sigma_d, eps_d = get_bb_pair_sigma_epsilon(args.i, args.nb, sym_pairs_inter)
 
@@ -696,5 +713,5 @@ excl_b, excl_c, excl_d, intra_pairs, inter_pairs = get_exclusions(vwb_excl, vwc_
 # write the updated itp/top files:
 write_include_files(args.moltype, args.missres, args.go_eps_intra,
                     args.go_eps_inter, c6c12, sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs,
-                    inter_pairs, virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d)
+                    inter_pairs, virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d, eps_intra_custom, eps_inter_custom)
 write_main_top_files(args.moltype, args.i, fnames)

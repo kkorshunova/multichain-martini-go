@@ -319,9 +319,6 @@ def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter):
                 upd_out_pdb.append([atomnr, 'VWD', resname, k, x, y, z, ch_id])
                 virtual_sites.append([atomnr, line[0]])
                 vwd_excl.append([k, atomnr])  # dict: key=resnr : val=atomnr
-    #print(resnr_intra)
-    #for line in vwb_excl:
-    #    print(line)
 
     # write an updated pdb file:
     with open(file_pref + '_cg_go.pdb', 'w') as f:
@@ -330,24 +327,6 @@ def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter):
                                                                         line[4], line[5], line[6])
             f.write(s2print)
         f.write('END   ')
-
-    sep_pdbs = False  # this feature allows for writing separate pdb files for each chain (not used currently)
-    if sep_pdbs:
-        # get unique chain ids:
-        unique_ids = [ ]
-        for line in out_pdb:
-            if line[7] not in unique_ids:
-                unique_ids.append(line[7])
-        # separate upd_out_pdb:
-        for id in unique_ids:
-            #print(id)
-            with open(file_pref + '_' + id + '_cg_go.pdb', 'w') as f:
-                for line in upd_out_pdb:
-                    if line[-1] == id:
-                        s2print = "ATOM  %5d %-4s %3s  %4d    %8.3f%8.3f%8.3f  1.00  0.00\n" % (line[0], line[1], line[2], line[3],
-                                                                            line[4], line[5], line[6])
-                        f.write(s2print)
-                f.write('END   ')
 
     return vwb_excl, vwc_excl, vwd_excl, virtual_sites, upd_out_pdb
 

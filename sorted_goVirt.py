@@ -11,7 +11,7 @@ import itertools  # needed for write_main_top()
 seqDist = 4  # minimal distance in the sequence to add a elastic bond (ElNedyn=3 [Perriole2009]; Go=4 [Poma2017])
 # (this has to result in the correct atom number when added to "k_at" compared to the .itp file)
 c6c12 = 0  # if set to 1, the C6 and C12 term are expected in the .itp file; if set to 0, sigma and go_eps are used
-mod_enabled = True  # %TODO this is a test feature!!
+mod_enabled = True
 debug_mode = True
 
 # names of the output included itp files:
@@ -155,7 +155,7 @@ def get_go(indBB, map_OVrCSU, cutoff_short, cutoff_long, go_eps_intra, seqDist, 
             Wii = 4.0 * pow(sigma,12) * go_eps_intra
             pairs.append([ int(indBB[ int(map_OVrCSU[k][0])-missRes-1 ,0]),  # atomnr BB_i
                            int(indBB[ int(map_OVrCSU[k][1])-missRes-1 ,0]),  # atomnr BB_j
-                           Vii, Wii,                                         # sigma, eps from map data (not used)
+                           Vii, Wii,                                         # TODO sigma, eps from map data (can be replaced with custom unsorted data)
                            int(map_OVrCSU[k][0]),                            # resnr BB_i
                            int(map_OVrCSU[k][1]),                            # resnr BB_j
                            map_OVrCSU[k][2],                                 # distance
@@ -278,12 +278,40 @@ def sym_pair_sort(sym_pairs, out_pdb, single_chain_mods):
         for pair in sym_pairs_inter:
             if (pair[0] <= single_chain_mods[0]) or (pair[1] <= single_chain_mods[0]):
                 if pair[3] not in unique_sigmas:
+                    # this is a very awkward way to ensure there are no 0s in indices...
+                    mono_inter_0 = pair[0] % single_chain_mods[0]
+                    if mono_inter_0 == 0:
+                        mono_inter_0 = single_chain_mods[0]
+                    mono_inter_1 = pair[1] % single_chain_mods[0]
+                    if mono_inter_1 == 0:
+                        mono_inter_1 = single_chain_mods[0]
+                    mono_inter_4 = pair[4] % single_chain_mods[1]
+                    if mono_inter_4 == 0:
+                        mono_inter_4 = single_chain_mods[1]
+                    mono_inter_5 = pair[5] % single_chain_mods[1]
+                    if mono_inter_5 == 0:
+                        mono_inter_5 = single_chain_mods[1]
+                    # now back to the main process:
                     unique_sigmas.append(pair[3])
-                    mono_inter.append([pair[0] % single_chain_mods[0], pair[1] % single_chain_mods[0],
+                    mono_inter.append([mono_inter_0, mono_inter_1,
                                        pair[2], pair[3],
-                                       pair[4] % single_chain_mods[1], pair[5] % single_chain_mods[1],
+                                       mono_inter_4, mono_inter_5,
                                        pair[6], pair[7]])
-        sym_pairs_inter = mono_inter
+        # todo: replace temp fix: getting rid of repeats in mono_inter
+        # Currently: simply takes only the first instance of a pair, i.e. C3-C22
+        # (second C3-C22 or a C22-C3 pair will be ignored)
+        for i in range(0, len(mono_inter)):
+            for j in range(i+1, len(mono_inter)):
+                if (((mono_inter[i][4] == mono_inter[j][4]) and (mono_inter[i][5] == mono_inter[j][5]))
+                        or ((mono_inter[i][5] == mono_inter[j][4]) and (mono_inter[i][4] == mono_inter[j][5]))):
+                    mono_inter[j][0] = "SKIP"   # tried using list.pop(j) but it messes up the indexing in the loop
+        mono_inter_sorted = []
+        for line in mono_inter:
+            if line[0] == "SKIP":
+                continue
+            else:
+                mono_inter_sorted.append(line)
+        sym_pairs_inter = mono_inter_sorted
         if debug_mode:
             print("Number of mono INTRA pairs: " + str(len(sym_pairs_intra)))
             print("Number of mono INTER pairs: " + str(len(sym_pairs_inter)))
@@ -312,8 +340,28 @@ def sym_pair_sort(sym_pairs, out_pdb, single_chain_mods):
         resnr_inter.append(line[5])
     resnr_inter = list(set(resnr_inter))
     resnr_inter.sort()
-
+    print('INTRA pairs: ', len(sym_pairs_intra))
+    # for line in sym_pairs_intra:
+    #     print(line)
+    print('INTER pairs: ', len(sym_pairs_inter))
+    # for line in sym_pairs_inter:
+    #     print(line)
     return sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter
+
+
+# read arrays with values for intra and inter epsilon
+# currently: same as scalar go_eps_intra/inter; later: read from file or anywhere else
+# requires knowledge of the amount of inter and intra pairs (=lengths of sym_pairs_intra/inter)
+# for unsorted general array, go to bookmark "epsilon array" aka sym_pairs_intra/inter[k][3]
+def get_eps_array(sym_pairs_intra, sym_pairs_inter, go_eps_intra, go_eps_inter):
+    eps_intra_custom = []
+    eps_inter_custom = []
+    for _ in sym_pairs_intra:
+        eps_intra_custom.append(go_eps_intra)
+    for _ in sym_pairs_inter:
+        eps_inter_custom.append(go_eps_inter)
+    print(len(eps_intra_custom), len(eps_inter_custom))
+    return eps_intra_custom, eps_inter_custom
 
 
 # new pdb file with all relevant particles: CG structure, VS[A-D]
@@ -534,9 +582,9 @@ def get_bb_pair_sigma_epsilon(itp_filename, martini_file, sym_pairs_inter):
 
 
 ########## FILE WRITING PROCEDURES ##########
-def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,
+def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,     #todo: either remove go_eps_intra, go_eps_inter or eps_intra_custom, eps_inter_custom
                 sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs, inter_pairs,
-                        virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d):
+                        virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d, eps_intra_custom, eps_inter_custom):
     # main.top -> martini_v3.0.0_go.itp [ atomtypes ]-> atomtypes_go.itp -> (file_pref)_atomtypes_go.itp
     # here: sets of (file_pref)_[A-D] VSites
     with open(file_pref + '_' + fnames[0], 'w') as f:
@@ -578,7 +626,7 @@ def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,
                                                                                       file_pref,
                                                                                       str(int(sym_pairs_intra[k][5])),
                                                                                       sym_pairs_intra[k][7],
-                                                                                      go_eps_intra,
+                                                                                      eps_intra_custom[k],             # go_eps_intra
                                                                                       str(int(sym_pairs_intra[k][0])),
                                                                                       str(int(sym_pairs_intra[k][1])),
                                                                                       sym_pairs_intra[k][6])
@@ -589,7 +637,7 @@ def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,
                                                                                       file_pref,
                                                                                       str(int(sym_pairs_intra[k][5])),
                                                                                       sym_pairs_intra[k][7],
-                                                                                      -go_eps_intra + 0.00001,  # avoid exact val
+                                                                                      -eps_intra_custom[k] + 0.00001,  # avoid exact val, -go_eps_intra
                                                                                       str(int(sym_pairs_intra[k][0])),
                                                                                       str(int(sym_pairs_intra[k][1])),
                                                                                       sym_pairs_intra[k][6])
@@ -601,7 +649,7 @@ def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,
                                                                                       file_pref,
                                                                                       str(int(sym_pairs_inter[k][5])),
                                                                                       sym_pairs_inter[k][7],
-                                                                                      go_eps_inter,
+                                                                                      eps_inter_custom[k],               # go_eps_inter
                                                                                       str(int(sym_pairs_inter[k][0])),
                                                                                       str(int(sym_pairs_inter[k][1])),
                                                                                       sym_pairs_inter[k][6])
@@ -880,6 +928,8 @@ sym_pairs = get_go(indBB, map_OVrCSU, args.cutoff_short, args.cutoff_long, args.
 out_pdb, single_chain_mods = assign_chain_ids(system_pdb_data, args.bb_cutoff, pdb_chain_ids, args.chain_sort, args.chain_file)
 # group sym_pairs into intra and inter based on their chain IDs
 sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter = sym_pair_sort(sym_pairs, out_pdb, single_chain_mods)
+# temporary feature: array of separate inter and intra epsilon values:
+eps_intra_custom, eps_inter_custom = get_eps_array(sym_pairs_intra, sym_pairs_inter, args.go_eps_intra, args.go_eps_inter)
 # retrieve sigma-epsilon values for each BB involved in intra-Go bonds (for D virtual sites)
 sigma_d, eps_d = get_bb_pair_sigma_epsilon(args.i, args.nb, sym_pairs_inter)
 
@@ -891,5 +941,5 @@ excl_b, excl_c, excl_d, intra_pairs, inter_pairs = get_exclusions(vwb_excl, vwc_
 # write the updated itp/top files:
 write_include_files(args.moltype, args.missres, args.go_eps_intra,
                     args.go_eps_inter, c6c12, sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs,
-                    inter_pairs, virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d)
+                    inter_pairs, virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d, eps_intra_custom, eps_inter_custom)
 write_main_top_files(args.moltype, args.i, fnames)

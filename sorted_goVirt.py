@@ -12,7 +12,7 @@ seqDist = 4  # minimal distance in the sequence to add a elastic bond (ElNedyn=3
 # (this has to result in the correct atom number when added to "k_at" compared to the .itp file)
 c6c12 = 0  # if set to 1, the C6 and C12 term are expected in the .itp file; if set to 0, sigma and go_eps are used
 mod_enabled = True
-debug_mode = True
+debug_mode = False
 
 # names of the output included itp files:
 if mod_enabled:

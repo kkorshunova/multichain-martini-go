@@ -35,7 +35,9 @@ else:
               'go.top']
 
 
-def itp_sections(x):  # helper function used to slice input itp into sections (called in write_main_top())
+def itp_sections(x):
+    """helper function used to slice input itp into sections (called in write_main_top())
+    """
     if x.startswith('[ '):
         itp_sections.count += 1
     return itp_sections.count
@@ -76,12 +78,19 @@ def user_input():
     return args
 
 
-# read_data() parses data from the .map file (output of the rCSU server)
-# returns: indBB (list of xyz coords of BB), map_OVrCSU (list: resID resID distance...), pdb_data, pdb_chain_ids
 def read_data(cg_pdb, file_contacts):
-    # read the pdb file: mind the fixed file format!
+    """
+    1. reads the input CG pdb file (mind the fixed pdb file format!)
+    2. parses data from the .map file (section "Residue residue contacts");
+
+    Returns:
+        pdb_data (list):  atomnr, atomname, resname, resnr, x,y,z, 0
+        pdb_chain_ids (list): chain id
+        indBB (array): BBs' atomnr, x,y,z
+        map_OVrCSU (list): resid, resid, CA-CA distance in Å
+    """
     pdb_data = [ ]
-    indBB = [ ]  # separate from pdb_data[] because indBB needs to be a numpy array
+    indBB = [ ]  # separate from pdb_data because indBB needs to be a numpy array
     pdb_chain_ids = [ ]  # character-based chain IDs from the pdb
     with open(cg_pdb, 'r') as file:
         # create a 2d array with all relevant data: pdb_data columns 1-3,5-8
@@ -110,7 +119,7 @@ def read_data(cg_pdb, file_contacts):
                 continue  # skips irrelevant lines (e.g. CONECT if it's present in file)
     indBB = np.array(indBB)
 
-    # read the map file.
+    # read the map file
     map_OVrCSU = [] # instead of shell calls (og ver)
     with open(file_contacts, 'r') as f:
         for line in f:
@@ -135,16 +144,21 @@ def read_data(cg_pdb, file_contacts):
     return indBB, map_OVrCSU, pdb_data, pdb_chain_ids
 
 
-# get_go() calculates and filters the Go pairs according to requirements (AT server map data -> CG structure)
-# returns: sym_pairs = [0:indBB, 1:indBB, 2:sigma, 3:eps, 4:resnr, 5:resnr, 6:distance, 7:sigma_const]
-#                     0, 1 - exclusions (molecule.itp)   2,3 - ignored   4-7 - go_table (martini.itp)
-# Vii and Wii:  not used in current ver., leftover from the original create_goVirt.py
 def get_go(indBB, map_OVrCSU, cutoff_short, cutoff_long, go_eps_intra, seqDist, missRes):
+    """
+    1. replaces AT CA-CA distances in map_OVrCSU with CG BB-BB distances using indBB array
+    2. filters pairs in map_OVrCSU based on min/max cutoff distances, creates sym_pars list
+
+    Returns:
+        sym_pairs (list): atomnr_i BB, atomnr_j BB, Vii, Wii, resnr_i BB, resnr_j BB, dist, sigma (from map_OVrCSU)
+        (usage: atomnr: exclusions, resnr, dist, sigma: go_table)
+    """
     # calculate the distances based on the coordinates of the CG BB bead
     for k in range(0, len(map_OVrCSU)):
         dist_vec = indBB[ int(map_OVrCSU[k][1])-missRes-1 ,1:4] - indBB[ int(map_OVrCSU[k][0])-missRes-1 ,1:4]
         map_OVrCSU[k][2] = np.linalg.norm(dist_vec) /10     # [Ang] to [nm]
 
+    # from the original goVirt script: create pairs list:
     pairs = []
     for k in range(0, len(map_OVrCSU)):
         if (map_OVrCSU[k][2] > cutoff_short) and (map_OVrCSU[k][2] < cutoff_long) \
@@ -155,7 +169,7 @@ def get_go(indBB, map_OVrCSU, cutoff_short, cutoff_long, go_eps_intra, seqDist, 
             Wii = 4.0 * pow(sigma,12) * go_eps_intra
             pairs.append([ int(indBB[ int(map_OVrCSU[k][0])-missRes-1 ,0]),  # atomnr BB_i
                            int(indBB[ int(map_OVrCSU[k][1])-missRes-1 ,0]),  # atomnr BB_j
-                           Vii, Wii,                                         # TODO sigma, eps from map data (can be replaced with custom unsorted data)
+                           Vii, Wii,                                         # todo: sigma, eps from map data (can be replaced with custom unsorted data)
                            int(map_OVrCSU[k][0]),                            # resnr BB_i
                            int(map_OVrCSU[k][1]),                            # resnr BB_j
                            map_OVrCSU[k][2],                                 # distance
@@ -180,6 +194,14 @@ def get_go(indBB, map_OVrCSU, cutoff_short, cutoff_long, go_eps_intra, seqDist, 
 
 ########## INTRA-INTER SORTING PROCEDURES ##########
 def assign_chain_ids(pdb_data, bb_cutoff, pdb_chain_ids, chain_sort_method, chain_file):
+    """
+    1. updates pdb_data (last column) with chain IDs (3 options: distance-based, from input pdb, from user input file)
+    2. defines length (in atomnr and resnr) of a single chain of the homopolymer and stores it in single_chain_mods
+
+    Returns:
+        pdb_data (list): created in read_data(), updated with chain-IDs here
+        single_chain_mods (list): atomnr, resnr
+    """
     # Distance-based method: only works for whole chains (no fragments), with all atoms in order
     if chain_sort_method == 0:
         new_chain_begins = []  # list of atom indices which start a new chain (starting from 2nd chain)
@@ -236,6 +258,7 @@ def assign_chain_ids(pdb_data, bb_cutoff, pdb_chain_ids, chain_sort_method, chai
             pdb_data[ndx][-1] = userinput_ids[ndx]
 
     # count the length of the first chain in atoms and residues:
+    # todo: count all chain lengths (user chooses which chain will be analyzed and written in the output)
     first_id = pdb_data[0][-1]
     chain_ids = []  # one column of a 2d array (pdb_data) is more accessible on its own
     for line in pdb_data:
@@ -250,30 +273,43 @@ def assign_chain_ids(pdb_data, bb_cutoff, pdb_chain_ids, chain_sort_method, chai
     return pdb_data, single_chain_mods
 
 
-# sym_pair_sort() separates sym_pairs into sym_pairs_intra and sym_pairs_inter based on the output of out_pdb
-# function input parameters: sym_pairs, out_pdb
-# function output: sym_pairs_intra, sym_pairs_inter
-# Q: separate intras further chain-wise - needed or not?
-# different epsilon entries: taken from the script input (--go_eps_intra, --go_eps_inter)
 def sym_pair_sort(sym_pairs, out_pdb, single_chain_mods):
+    """
+    1. takes sym_pairs list and separates it into INTRA and INTER type pairs based on the chain IDs provided by out_pdb
+    (pdb_data) list
+    2. shortens/filters the pairs lists (INTRA and INTER) by choosing a single chain and performing the modulo
+    operation for INTER pairs (so that all atomnr and resnr are < chain length)
+    2.2. if after modulo operation, two or more pairs end up having the same indices, only the 1st is taken into account
+
+    :param sym_pairs: atomnr_i BB, atomnr_j BB, Vii, Wii, resnr_i BB, resnr_j BB, dist, sigma (from map_OVrCSU)
+    :param out_pdb: (pdb_data) atomnr, atomname, resname, resnr, x,y,z, chainID
+    :param single_chain_mods: atomnr, resnr
+    Returns:
+        sym_pairs_intra/inter (list): (upd) atomnr_i, (upd) atomnr_j, Vii, Wii, (upd) resnr_i, (upd) resnr_j, dist, sigma
+        resnr_intra/inter (list): unique sorted residue numbers of residues involved in INTRA and INTER pairs
+    """
     sym_pairs_intra = [ ]
     sym_pairs_inter = [ ]
     for index, pair in enumerate(sym_pairs):
         index_i = sym_pairs[index][0]
         index_j = sym_pairs[index][1]
+        #  if chain ID (last column) of atom i is the same as chain ID of atom j --> INTRA, otherwise INTER
         if out_pdb[index_i][-1] == out_pdb[index_j][-1]:
             sym_pairs_intra.append(pair)
         else:
             sym_pairs_inter.append(pair)
     if mod_enabled:  # edit sym_pairs_inter and intra by shortening them, otherwise skip
         # INTRA: take only pairs from the 1st chain, i.e. atom_ids < chain length:
+        # todo: user choice of chain (1st, 2nd, etc.)
         mono_intra = []
         for i in range(len(sym_pairs_intra)):
             if sym_pairs_intra[i][0] <= single_chain_mods[0]:  # 2nd half of the pair will be in the same chain by def
                 mono_intra.append(sym_pairs_intra[i])
         sym_pairs_intra = mono_intra
         # INTER: filter pairs involving chain 1, then recalculate indices using mod to fit in one chain range
+        # todo: user choice of chain (1st, 2nd, etc.)
         mono_inter = []
+        # todo: remove/replace unique_sigmas!
         unique_sigmas = []  # temp array to store a unique sigma value (impromptu dictionary key)
         for pair in sym_pairs_inter:
             if (pair[0] <= single_chain_mods[0]) or (pair[1] <= single_chain_mods[0]):
@@ -349,11 +385,15 @@ def sym_pair_sort(sym_pairs, out_pdb, single_chain_mods):
     return sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter
 
 
-# read arrays with values for intra and inter epsilon
-# currently: same as scalar go_eps_intra/inter; later: read from file or anywhere else
-# requires knowledge of the amount of inter and intra pairs (=lengths of sym_pairs_intra/inter)
-# for unsorted general array, go to bookmark "epsilon array" aka sym_pairs_intra/inter[k][3]
 def get_eps_array(sym_pairs_intra, sym_pairs_inter, go_eps_intra, go_eps_inter):
+    """
+    temporary function, converts scalar eps values into arrays
+    currently: same as scalar go_eps_intra/inter; later: read from file or anywhere else
+    requires knowledge of the amount of inter and intra pairs (=lengths of sym_pairs_intra/inter)
+
+    Returns:
+        eps_intra_custom, eps_inter_custom (lists)
+    """
     eps_intra_custom = []
     eps_inter_custom = []
     for _ in sym_pairs_intra:
@@ -364,11 +404,19 @@ def get_eps_array(sym_pairs_intra, sym_pairs_inter, go_eps_intra, go_eps_inter):
     return eps_intra_custom, eps_inter_custom
 
 
-# new pdb file with all relevant particles: CG structure, VS[A-D]
-# input: system_pdb_data
-# output: updated pdb file (implicitly), exclusions, virtual sites mapping
 def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter):
-    # starting atomnr: last index in out_pdb+1 OR last index of a signle chain (mono)
+    """
+    1. appends virtual site entries for INTRA and INTER go sites to the copy of (now single chain) out_pdb
+    2. creates a list for the "virtual sites" section in the output itp
+    3. creates lists for "exclusions" section of the output itp (separate for VS B,C,D)
+
+    Returns:
+        vwb_excl, vwc_excl, vwd_excl (lists): resnr, VS (B,C,D) atomnr
+        virtual_sites (list): VS (B,C,D) atomnr, BB atomnr
+        upd_out_pdb (list): atomnr, atomname, resname, resnr, x, y, z, chain_id
+    """
+    # atomnr: running index, starts as last index in out_pdb OR last index of a single chain (mono)
+    # VS atomnr and resnr will start from atomnr+1
     if mod_enabled:
         atomnr = single_chain_mods[0]
     else:
@@ -376,19 +424,20 @@ def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter):
 
     upd_out_pdb = out_pdb.copy()
 
-    if mod_enabled:  # pdb with just the 1st of the N identical chains
+    if mod_enabled:  # writes pdb with single chain out of N identical chains in the input complex
         mono_pdb = []
-        chain_id = out_pdb[0][-1]  # first chain-ID
+        chain_id = out_pdb[0][-1]
+        # todo: currently 1st chain-ID (allows n-th chain option if chain_id is chosen properly)
         for line in out_pdb:
             if line[-1] == chain_id:
                 mono_pdb.append(line)
         upd_out_pdb = mono_pdb
 
-    # for exclusions: additional structs for later:
-    vwb_excl = []
+    # for exclusions: additional lists for later:
+    vwb_excl = [] # resnr, VS atomnr
     vwc_excl = []
     vwd_excl = []
-    virtual_sites = []
+    virtual_sites = [] # VS atomnr, its respective BB atomnr
     # given the list of resnr_intra, write new entries for virtual sites A:
     for k in resnr_intra:
         atomnr += 1
@@ -456,6 +505,14 @@ def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter):
 
 
 def get_exclusions(vwb_excl, vwc_excl, vwd_excl, sym_pairs_intra, sym_pairs_inter):
+    """
+    creates exclusion lists for VS B,C,D (atomnr - atomnr) based on the lists of intra and inter residue number pairs
+    (maps indices of VS to these residue pairs)
+
+    Returns:
+        excl_b, excl_c, excl_d (lists): atomnr VS, atomnr VS
+        intra_pairs, inter_pairs (lists): resnr VS, resnr VS
+    """
     # turn arrays into dicts:
     # create a dictionary: key: resnr; value: atomnr
     vwb_excl = np.array(vwb_excl)
@@ -490,6 +547,13 @@ def get_exclusions(vwb_excl, vwc_excl, vwd_excl, sym_pairs_intra, sym_pairs_inte
 
 
 def get_bb_pair_sigma_epsilon(itp_filename, martini_file, sym_pairs_inter):
+    """
+    Extracts the sigma-epsilon value pairs from the martini .itp
+    (needed to create VS D which counteract BB particle interactions, hence eps(VSD_i) = -eps(BB_i)
+
+    Returns:
+        sigma_d, eps_d (lists): used in (file_pref)_nonbond_params_go.itp for VS D
+    """
 
     # 1. extract "atom index - atomtype" information from the [ atoms ] section of molecule.itp
     atoms_section = []
@@ -585,6 +649,9 @@ def get_bb_pair_sigma_epsilon(itp_filename, martini_file, sym_pairs_inter):
 def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,     #todo: either remove go_eps_intra, go_eps_inter or eps_intra_custom, eps_inter_custom
                 sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs, inter_pairs,
                         virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d, eps_intra_custom, eps_inter_custom):
+    """
+    writes all included .itp files
+    """
     # main.top -> martini_v3.0.0_go.itp [ atomtypes ]-> atomtypes_go.itp -> (file_pref)_atomtypes_go.itp
     # here: sets of (file_pref)_[A-D] VSites
     with open(file_pref + '_' + fnames[0], 'w') as f:
@@ -734,8 +801,10 @@ def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,  
             f.write(s2print)
 
 
-# modifies the .top and .itp written by martinize2 (w/o -go-vs flag), inserts "#include" lines
 def write_main_top_files(file_pref, molecule_itp, fnames):
+    """
+    modifies the .top and .itp written by martinize2 (w/o -go-vs flag), inserts "#include" lines
+    """
     itp_file = [ ]
     itp_sections.count = 0
     itp_go_sections = ['[ virtual_sitesn ]\n', '[ exclusions ]\n']  # sections requiring modification by Go

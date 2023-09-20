@@ -60,7 +60,7 @@ UPDATED (230919) features include:
 
 All auxiliary itp file names follow the same convention: prefix (defined via `--moltype`) + itp section name + `go_mono` (OLD ver.: `go`)
 
-For the organization of the output files, refer to this [flowchart](https://github.com/kkorshunova/multichain-martini-go/blob/master/docs/MGo_top_A1.pdf).
+(to be updated) For the organization of the output files, refer to this [flowchart](https://github.com/kkorshunova/multichain-martini-go/blob/master/docs/MGo_top_A1.pdf).
 
 ### How to choose a suitable chain sorting method:
 Identification of separate chains in the input protein structure can be done in three ways:
@@ -68,3 +68,8 @@ Identification of separate chains in the input protein structure can be done in 
  2. if input pdb has correct chain-ID records: read from pdb
  3. catch-all option: user-defined chain-ID supplied in a separate, single-column plain text file (one entry per line, same order as in the input structure pdb, N(lines)=N(ATOM records)) 
 
+### To-do list:
+- [ ] make the choice of the analyzed single chain user-controlled (currently: 1st chain by default)
+- [ ] sym_pair_sort(): improve and test INTER pair sorting
+- [ ] get_bb_pair_sigma_epsilon(): improve analysis and filtering of the martini.itp
+- [ ] (Opt.) better Go-bond visualization

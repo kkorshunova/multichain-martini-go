@@ -55,10 +55,10 @@ UPDATED (230919) features include:
 - (\*Opt.) `--missres` number of missing residues at the beginning of the atomistic pdb structure (legacy variable, default: 0)
 
 ### Output files:
-- `mol_go.top` main system topology file 
-- `mol_go.itp` main include topology file
-
-All auxiliary itp file names follow the same convention: prefix (defined via `--moltype`) + itp section name + `go_mono` (OLD ver.: `go`)
+Prefix is defined via `--moltype` flag (`mol` by default)
+- prefix + `_go_mono.top`: main system topology file 
+- prefix + `_go_mono.itp`: main include topology file
+- prefix + itp section name + `_go_mono.itp`: all auxiliary itp file names
 
 (to be updated) For the organization of the output files, refer to this [flowchart](https://github.com/kkorshunova/multichain-martini-go/blob/master/docs/MGo_top_A1.pdf).
 

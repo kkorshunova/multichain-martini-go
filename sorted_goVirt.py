@@ -74,6 +74,10 @@ def user_input():
     parser.add_argument('--bb_cutoff', type=int, default=10,
                         help='Max distance (in A) allowed between next-neighbor BBs (default: 10 A).')
     parser.add_argument('--chain_file', help='File containing chain IDs (one per line; same order as input CG PDB)')
+    parser.add_argument('--chain_id', default='A',
+                        help='Select the output chain for which the contacts will be alanyzed. (ChainID either from the'
+                             'input pdb file (--chain_sort 1) or the user provided text file (--chain_sort 2)'
+                             '(default: A)')
     args = parser.parse_args()
     return args
 
@@ -193,7 +197,7 @@ def get_go(indBB, map_OVrCSU, cutoff_short, cutoff_long, go_eps_intra, seqDist, 
 
 
 ########## INTRA-INTER SORTING PROCEDURES ##########
-def assign_chain_ids(pdb_data, bb_cutoff, pdb_chain_ids, chain_sort_method, chain_file):
+def assign_chain_ids(pdb_data, bb_cutoff, pdb_chain_ids, chain_sort_method, chain_file, selected_chain):
     """
     1. updates pdb_data (last column) with chain IDs (3 options: distance-based, from input pdb, from user input file)
     2. defines length (in atomnr and resnr) of a single chain of the homopolymer and stores it in single_chain_mods
@@ -202,7 +206,7 @@ def assign_chain_ids(pdb_data, bb_cutoff, pdb_chain_ids, chain_sort_method, chai
         pdb_data (list): created in read_data(), updated with chain-IDs here
         single_chain_mods (list): atomnr, resnr
     """
-    # Distance-based method: only works for whole chains (no fragments), with all atoms in order
+    # [DEPRECIATED] Distance-based method: only works for whole chains (no fragments), with all atoms in order
     if chain_sort_method == 0:
         new_chain_begins = []  # list of atom indices which start a new chain (starting from 2nd chain)
         system_BB_only = []
@@ -257,20 +261,24 @@ def assign_chain_ids(pdb_data, bb_cutoff, pdb_chain_ids, chain_sort_method, chai
         for ndx in range(len(pdb_data)):
             pdb_data[ndx][-1] = userinput_ids[ndx]
 
-    # count the length of the first chain in atoms and residues:
-    # todo: count all chain lengths (user chooses which chain will be analyzed and written in the output)
-    first_id = pdb_data[0][-1]
-    chain_ids = []  # one column of a 2d array (pdb_data) is more accessible on its own
+    # count the length of the selected chain in atoms and residues:
+    current_chain_atomnums = [ ]
+    current_chain_resnums = [ ]
     for line in pdb_data:
-        chain_ids.append(line[-1])
-    chain_length = chain_ids.count(first_id)  # counted the occurrences of the fist id only
-    # put single chain length (in atoms and residues) in one array for later use:
-    single_chain_mods = [chain_length, pdb_data[chain_length-1][3]]
-    if debug_mode:
-        print("Length of 1st chain in atoms = " + str(single_chain_mods[0]))
-        print("Length of 1st chain in residues = " + str(single_chain_mods[1]))
+        if line[-1] == selected_chain: # gets all residue numbers for selected chain ID
+            current_chain_atomnums.append(line[0])
+            current_chain_resnums.append(line[3])
+    mod_chain_at_nums = [min(current_chain_atomnums), max(current_chain_atomnums)]
+    mod_chain_res_nums = [min(current_chain_resnums), max(current_chain_resnums)]
 
-    return pdb_data, single_chain_mods
+    # put single chain length (in atoms and residues) in one array for later use:
+    single_chain_mods = [(mod_chain_at_nums[1] + 1) - mod_chain_at_nums[0],
+                         (mod_chain_res_nums[1] + 1) - mod_chain_res_nums[0]]
+    if debug_mode:
+        print("Length of chain " + selected_chain + " in atoms = " + str(single_chain_mods[0]))
+        print("Length of chain " + selected_chain + " in residues = " + str(single_chain_mods[1]))
+
+    return pdb_data, single_chain_mods, mod_chain_at_nums, mod_chain_res_nums
 
 
 def sym_pair_sort(sym_pairs, out_pdb, single_chain_mods):
@@ -300,40 +308,51 @@ def sym_pair_sort(sym_pairs, out_pdb, single_chain_mods):
             sym_pairs_inter.append(pair)
     if mod_enabled:  # edit sym_pairs_inter and intra by shortening them, otherwise skip
         # INTRA: take only pairs from the 1st chain, i.e. atom_ids < chain length:
-        # todo: user choice of chain (1st, 2nd, etc.)
         mono_intra = []
-        for i in range(len(sym_pairs_intra)):
-            if sym_pairs_intra[i][0] <= single_chain_mods[0]:  # 2nd half of the pair will be in the same chain by def
-                mono_intra.append(sym_pairs_intra[i])
+        for pair in sym_pairs_intra:
+            #if sym_pairs_intra[i][0] >= mod_chain_at_nums[0] and sym_pairs_intra[i][0] <= mod_chain_at_nums[1]:
+            if mod_chain_at_nums[0] <= pair[0] <= mod_chain_at_nums[1]:
+                # (2nd half of the pair will be in the same chain by def)
+                # reset atom and residue numbers to starting with 1 using mod operation:
+                mono_intra_0 = pair[0] % single_chain_mods[0]
+                if mono_intra_0 == 0:
+                    mono_intra_0 = single_chain_mods[0]
+                mono_intra_1 = pair[1] % single_chain_mods[0]
+                if mono_intra_1 == 0:
+                    mono_intra_1 = single_chain_mods[0]
+                mono_intra_4 = pair[4] % single_chain_mods[1]
+                if mono_intra_4 == 0:
+                    mono_intra_4 = single_chain_mods[1]
+                mono_intra_5 = pair[5] % single_chain_mods[1]
+                if mono_intra_5 == 0:
+                    mono_intra_5 = single_chain_mods[1]
+                mono_intra.append([mono_intra_0, mono_intra_1, pair[2], pair[3], mono_intra_4, mono_intra_5,
+                                   pair[6], pair[7]])
         sym_pairs_intra = mono_intra
         # INTER: filter pairs involving chain 1, then recalculate indices using mod to fit in one chain range
-        # todo: user choice of chain (1st, 2nd, etc.)
         mono_inter = []
-        # todo: remove/replace unique_sigmas!
-        unique_sigmas = []  # temp array to store a unique sigma value (impromptu dictionary key)
         for pair in sym_pairs_inter:
-            if (pair[0] <= single_chain_mods[0]) or (pair[1] <= single_chain_mods[0]):
-                if pair[3] not in unique_sigmas:
-                    # this is a very awkward way to ensure there are no 0s in indices...
-                    mono_inter_0 = pair[0] % single_chain_mods[0]
-                    if mono_inter_0 == 0:
-                        mono_inter_0 = single_chain_mods[0]
-                    mono_inter_1 = pair[1] % single_chain_mods[0]
-                    if mono_inter_1 == 0:
-                        mono_inter_1 = single_chain_mods[0]
-                    mono_inter_4 = pair[4] % single_chain_mods[1]
-                    if mono_inter_4 == 0:
-                        mono_inter_4 = single_chain_mods[1]
-                    mono_inter_5 = pair[5] % single_chain_mods[1]
-                    if mono_inter_5 == 0:
-                        mono_inter_5 = single_chain_mods[1]
-                    # now back to the main process:
-                    unique_sigmas.append(pair[3])
-                    mono_inter.append([mono_inter_0, mono_inter_1,
-                                       pair[2], pair[3],
-                                       mono_inter_4, mono_inter_5,
-                                       pair[6], pair[7]])
-        # todo: replace temp fix: getting rid of repeats in mono_inter
+            # if both atom indices of the current pair are within the chosen chain:
+            if (mod_chain_at_nums[0] <= pair[0] <= mod_chain_at_nums[1]) or \
+                    (mod_chain_at_nums[0] <= pair[1] <= mod_chain_at_nums[1]):
+                # reset atom and residue numbers to starting with 1 using mod operation:
+                mono_inter_0 = pair[0] % single_chain_mods[0]
+                if mono_inter_0 == 0:
+                    mono_inter_0 = single_chain_mods[0]
+                mono_inter_1 = pair[1] % single_chain_mods[0]
+                if mono_inter_1 == 0:
+                    mono_inter_1 = single_chain_mods[0]
+                mono_inter_4 = pair[4] % single_chain_mods[1]
+                if mono_inter_4 == 0:
+                    mono_inter_4 = single_chain_mods[1]
+                mono_inter_5 = pair[5] % single_chain_mods[1]
+                if mono_inter_5 == 0:
+                    mono_inter_5 = single_chain_mods[1]
+                mono_inter.append([mono_inter_0, mono_inter_1,
+                                   pair[2], pair[3],
+                                   mono_inter_4, mono_inter_5,
+                                   pair[6], pair[7]])
+        # todo: reconsider how to get rid of repeats in mono_inter?
         # Currently: simply takes only the first instance of a pair, i.e. C3-C22
         # (second C3-C22 or a C22-C3 pair will be ignored)
         for i in range(0, len(mono_inter)):
@@ -376,10 +395,10 @@ def sym_pair_sort(sym_pairs, out_pdb, single_chain_mods):
         resnr_inter.append(line[5])
     resnr_inter = list(set(resnr_inter))
     resnr_inter.sort()
-    print('INTRA pairs: ', len(sym_pairs_intra))
+    #print('INTRA pairs: ', len(sym_pairs_intra))
     # for line in sym_pairs_intra:
     #     print(line)
-    print('INTER pairs: ', len(sym_pairs_inter))
+    #print('INTER pairs: ', len(sym_pairs_inter))
     # for line in sym_pairs_inter:
     #     print(line)
     return sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter
@@ -400,11 +419,11 @@ def get_eps_array(sym_pairs_intra, sym_pairs_inter, go_eps_intra, go_eps_inter):
         eps_intra_custom.append(go_eps_intra)
     for _ in sym_pairs_inter:
         eps_inter_custom.append(go_eps_inter)
-    print(len(eps_intra_custom), len(eps_inter_custom))
+    #print(len(eps_intra_custom), len(eps_inter_custom))
     return eps_intra_custom, eps_inter_custom
 
 
-def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter):
+def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter, selected_chain):
     """
     1. appends virtual site entries for INTRA and INTER go sites to the copy of (now single chain) out_pdb
     2. creates a list for the "virtual sites" section in the output itp
@@ -425,12 +444,20 @@ def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter):
     upd_out_pdb = out_pdb.copy()
 
     if mod_enabled:  # writes pdb with single chain out of N identical chains in the input complex
+        running_at_ndx = 1
+        reset_res_ndx = 1
+        reset_res_ndx_chain = [ ] # list of residue indices starting from 1. Will be used in writing section [ atoms ]
         mono_pdb = []
-        chain_id = out_pdb[0][-1]
-        # todo: currently 1st chain-ID (allows n-th chain option if chain_id is chosen properly)
-        for line in out_pdb:
-            if line[-1] == chain_id:
-                mono_pdb.append(line)
+        for ndx, line in enumerate(out_pdb):
+            if line[-1] == selected_chain:
+                reset_res_ndx_chain.append(reset_res_ndx)
+                mono_pdb.append([running_at_ndx, line[1], line[2], reset_res_ndx, line[4], line[5], line[6], line[7]])
+                # if the residue number changes in the next line, increment the residue number:
+                if ndx+1 < len(out_pdb): # if-clause prevents going out of range for the last pdb line
+                    if out_pdb[ndx+1][3] != out_pdb[ndx][3]:
+                        reset_res_ndx += 1
+                # atom number is incremented every line regardless
+                running_at_ndx += 1
         upd_out_pdb = mono_pdb
 
     # for exclusions: additional lists for later:
@@ -501,7 +528,7 @@ def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter):
             f.write(s2print)
         f.write('END   ')
 
-    return vwb_excl, vwc_excl, vwd_excl, virtual_sites, upd_out_pdb
+    return vwb_excl, vwc_excl, vwd_excl, virtual_sites, upd_out_pdb, reset_res_ndx_chain
 
 
 def get_exclusions(vwb_excl, vwc_excl, vwd_excl, sym_pairs_intra, sym_pairs_inter):
@@ -801,7 +828,7 @@ def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,  
             f.write(s2print)
 
 
-def write_main_top_files(file_pref, molecule_itp, fnames):
+def write_main_top_files(file_pref, molecule_itp, fnames, mod_chain_at_nums, reset_res_ndx_chain):
     """
     modifies the .top and .itp written by martinize2 (w/o -go-vs flag), inserts "#include" lines
     """
@@ -822,6 +849,7 @@ def write_main_top_files(file_pref, molecule_itp, fnames):
     # find missing headers:
     missing_headers = list(set(itp_go_sections) - set(input_itp_headers))
     # write out the (modified) itp file
+    # todo: must take the correct section and correct numbering!
     with open(file_pref + '_' + fnames[6], 'w') as f:
         for section in itp_file:
             if 'moleculetype' in section[0]:  # rewrite this section entirely with the right molecule name
@@ -829,8 +857,25 @@ def write_main_top_files(file_pref, molecule_itp, fnames):
                 f.write(file_pref + '    1\n\n')
             elif 'atoms' in section[0]:  # how to filter for sections that will be expanded
                 if mod_enabled:  # only write the first N lines of section (N=atoms in 1st chain)
-                    for ndx in range(single_chain_mods[0]+1):
-                        f.write(section[ndx])
+                    #todo write the correct section with reset numbering
+                    #for ndx in range(single_chain_mods[0]+1):
+                    #    f.write(section[ndx])
+                    atomind = 1 # atom index is a simple counter
+                    resind = 0  # index for residue list to insert correct residue numbers
+                    for ndx, line in enumerate(section):
+                        if '[ atoms ]' in line:
+                            f.write(line)
+                        line = line.split()
+                        # if the atom is withing the atom index range of the chosen chain
+                        if len(line) == 7 and (mod_chain_at_nums[0] <= int(line[0]) <= mod_chain_at_nums[1]):
+                            # todo: change line[2] to correct residue numbering!
+                            s2print = '%5d %-4s %4s %3s %-3s %-5d %4s\n' % (atomind, line[1], reset_res_ndx_chain[resind], line[3],
+                                                                           line[4], atomind, line[6])
+                            #s2print = '%3d %s_%s%-3d %6d %3s %-3s %-5d 0.0\n'
+                            f.write(s2print)
+                            atomind += 1
+                            resind += 1
+                    #todo end of this to-change part
                 else:            # otherwise, write the entire section as in the input itp
                     for line in section:
                         f.write(line)
@@ -994,7 +1039,9 @@ indBB, map_OVrCSU, system_pdb_data, pdb_chain_ids = read_data(args.s, args.f)
 sym_pairs = get_go(indBB, map_OVrCSU, args.cutoff_short, args.cutoff_long, args.go_eps_intra, seqDist, args.missres)
 
 # sort Go pairs into intra and inter sub-lists:
-out_pdb, single_chain_mods = assign_chain_ids(system_pdb_data, args.bb_cutoff, pdb_chain_ids, args.chain_sort, args.chain_file)
+out_pdb, single_chain_mods, mod_chain_at_nums, mod_chain_res_nums = assign_chain_ids(system_pdb_data, args.bb_cutoff,
+                                                                                     pdb_chain_ids, args.chain_sort,
+                                                                                     args.chain_file, args.chain_id)
 # group sym_pairs into intra and inter based on their chain IDs
 sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter = sym_pair_sort(sym_pairs, out_pdb, single_chain_mods)
 # temporary feature: array of separate inter and intra epsilon values:
@@ -1004,11 +1051,13 @@ sigma_d, eps_d = get_bb_pair_sigma_epsilon(args.i, args.nb, sym_pairs_inter)
 
 
 # write the updated pdb file (VS A-D):
-vwb_excl, vwc_excl, vwd_excl, virtual_sites, upd_out_pdb = update_pdb(args.moltype, out_pdb, resnr_intra, resnr_inter)
+vwb_excl, vwc_excl, vwd_excl, virtual_sites, upd_out_pdb, reset_res_ndx_chain = update_pdb(args.moltype, out_pdb,
+                                                                                           resnr_intra, resnr_inter,
+                                                                                           args.chain_id)
 excl_b, excl_c, excl_d, intra_pairs, inter_pairs = get_exclusions(vwb_excl, vwc_excl, vwd_excl, sym_pairs_intra,
                                                                   sym_pairs_inter)
 # write the updated itp/top files:
 write_include_files(args.moltype, args.missres, args.go_eps_intra,
                     args.go_eps_inter, c6c12, sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs,
                     inter_pairs, virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d, eps_intra_custom, eps_inter_custom)
-write_main_top_files(args.moltype, args.i, fnames)
+write_main_top_files(args.moltype, args.i, fnames, mod_chain_at_nums, reset_res_ndx_chain)

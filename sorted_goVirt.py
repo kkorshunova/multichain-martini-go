@@ -12,7 +12,7 @@ seqDist = 4  # minimal distance in the sequence to add a elastic bond (ElNedyn=3
 # (this has to result in the correct atom number when added to "k_at" compared to the .itp file)
 c6c12 = 0  # if set to 1, the C6 and C12 term are expected in the .itp file; if set to 0, sigma and go_eps are used
 mod_enabled = True
-debug_mode = False
+debug_mode = True
 
 # names of the output included itp files:
 if mod_enabled:
@@ -33,14 +33,6 @@ else:
               'viz_go.itp',
               'go.itp',
               'go.top']
-
-
-def itp_sections(x):
-    """helper function used to slice input itp into sections (called in write_main_top())
-    """
-    if x.startswith('[ '):
-        itp_sections.count += 1
-    return itp_sections.count
 
 
 ##################### FUNCTIONS #####################
@@ -75,7 +67,7 @@ def user_input():
                         help='Max distance (in A) allowed between next-neighbor BBs (default: 10 A).')
     parser.add_argument('--chain_file', help='File containing chain IDs (one per line; same order as input CG PDB)')
     parser.add_argument('--chain_id', default='A',
-                        help='Select the output chain for which the contacts will be alanyzed. (ChainID either from the'
+                        help='Select the output chain for which the contacts will be analyzed. (ChainID either from the'
                              'input pdb file (--chain_sort 1) or the user provided text file (--chain_sort 2)'
                              '(default: A)')
     args = parser.parse_args()
@@ -189,8 +181,6 @@ def get_go(indBB, map_OVrCSU, cutoff_short, cutoff_long, go_eps_intra, seqDist, 
                 if (pairs[l][0] == pairs[k][1]) and (pairs[l][1] == pairs[k][0]):
                     sym_pairs.append(pairs[k])
     if debug_mode:
-        # for line in sym_pairs:
-        #     print(line)
         print("Total number of Go-bonds extracted from the map file: " + str(len(sym_pairs)))
 
     return sym_pairs
@@ -372,12 +362,6 @@ def sym_pair_sort(sym_pairs, out_pdb, single_chain_mods):
             print("Number of mono INTER pairs: " + str(len(sym_pairs_inter)))
 
     if debug_mode and not mod_enabled:
-        # print('INTRA pairs')
-        # for line in sym_pairs_intra:
-        #     print(line)
-        # print('INTER pairs')
-        # for line in sym_pairs_inter:
-        #     print(line)
         print("Number of INTRA pairs: " + str(len(sym_pairs_intra)))
         print("Number of INTER pairs: " + str(len(sym_pairs_inter)))
 
@@ -395,12 +379,6 @@ def sym_pair_sort(sym_pairs, out_pdb, single_chain_mods):
         resnr_inter.append(line[5])
     resnr_inter = list(set(resnr_inter))
     resnr_inter.sort()
-    #print('INTRA pairs: ', len(sym_pairs_intra))
-    # for line in sym_pairs_intra:
-    #     print(line)
-    #print('INTER pairs: ', len(sym_pairs_inter))
-    # for line in sym_pairs_inter:
-    #     print(line)
     return sym_pairs_intra, sym_pairs_inter, resnr_intra, resnr_inter
 
 
@@ -443,11 +421,19 @@ def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter, selected_chain):
 
     upd_out_pdb = out_pdb.copy()
 
+    # for exclusions: additional lists for later:
+    vwb_excl = [] # resnr, VS atomnr
+    vwc_excl = []
+    vwd_excl = []
+    virtual_sites = [] # VS atomnr, its respective BB atomnr
+    # given the list of resnr_intra, write new entries for virtual sites A:
+
     if mod_enabled:  # writes pdb with single chain out of N identical chains in the input complex
         running_at_ndx = 1
         reset_res_ndx = 1
         reset_res_ndx_chain = [ ] # list of residue indices starting from 1. Will be used in writing section [ atoms ]
         mono_pdb = []
+        # write the Martini chain section in pdb
         for ndx, line in enumerate(out_pdb):
             if line[-1] == selected_chain:
                 reset_res_ndx_chain.append(reset_res_ndx)
@@ -459,62 +445,109 @@ def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter, selected_chain):
                 # atom number is incremented every line regardless
                 running_at_ndx += 1
         upd_out_pdb = mono_pdb
-
-    # for exclusions: additional lists for later:
-    vwb_excl = [] # resnr, VS atomnr
-    vwc_excl = []
-    vwd_excl = []
-    virtual_sites = [] # VS atomnr, its respective BB atomnr
-    # given the list of resnr_intra, write new entries for virtual sites A:
-    for k in resnr_intra:
-        atomnr += 1
-        for line in out_pdb:
-            if line[1] == 'BB' and line[3] == k:
-                resname = line[2]
-                x = line[4]
-                y = line[5]
-                z = line[6]
-                ch_id = line[7]
-                upd_out_pdb.append([atomnr, 'VWA', resname, k, x, y, z, ch_id])
-                virtual_sites.append([atomnr, line[0]])
-    # repeat for sites B:
-    for k in resnr_intra:
-        atomnr += 1
-        for line in out_pdb:
-            if line[1] == 'BB' and line[3] == k:
-                resname = line[2]
-                x = line[4]
-                y = line[5]
-                z = line[6]
-                ch_id = line[7]
-                upd_out_pdb.append([atomnr, 'VWB', resname, k, x, y, z, ch_id])
-                virtual_sites.append([atomnr, line[0]])
-                vwb_excl.append([k, atomnr]) # dict: key=resnr : val=atomnr
-    # sites C and D:
-    for k in resnr_inter:
-        atomnr += 1
-        for line in out_pdb:
-            if line[1] == 'BB' and line[3] == k:
-                resname = line[2]
-                x = line[4]
-                y = line[5]
-                z = line[6]
-                ch_id = line[7]
-                upd_out_pdb.append([atomnr, 'VWC', resname, k, x, y, z, ch_id])
-                virtual_sites.append([atomnr, line[0]])
-                vwc_excl.append([k, atomnr])  # dict: key=resnr : val=atomnr
-    for k in resnr_inter:
-        atomnr += 1
-        for line in out_pdb:
-            if line[1] == 'BB' and line[3] == k:
-                resname = line[2]
-                x = line[4]
-                y = line[5]
-                z = line[6]
-                ch_id = line[7]
-                upd_out_pdb.append([atomnr, 'VWD', resname, k, x, y, z, ch_id])
-                virtual_sites.append([atomnr, line[0]])
-                vwd_excl.append([k, atomnr])  # dict: key=resnr : val=atomnr
+        # write the Go chain section in pdb, as well as exclusion lists for itps later
+        # this section has to use the mono_pbd list and not out_pdb so that all the atom and residue numbering
+        # is as in the selected chain (after the modulo operation), as well as the coordinates!!
+        for k in resnr_intra:
+            atomnr += 1
+            for line in mono_pdb:
+                if line[1] == 'BB' and line[3] == k:
+                    resname = line[2]
+                    x = line[4]
+                    y = line[5]
+                    z = line[6]
+                    ch_id = line[7]
+                    upd_out_pdb.append([atomnr, 'VWA', resname, k, x, y, z, ch_id])
+                    virtual_sites.append([atomnr, line[0]])
+        # repeat for sites B:
+        for k in resnr_intra:
+            atomnr += 1
+            for line in mono_pdb:
+                if line[1] == 'BB' and line[3] == k:
+                    resname = line[2]
+                    x = line[4]
+                    y = line[5]
+                    z = line[6]
+                    ch_id = line[7]
+                    upd_out_pdb.append([atomnr, 'VWB', resname, k, x, y, z, ch_id])
+                    virtual_sites.append([atomnr, line[0]])
+                    vwb_excl.append([k, atomnr])  # dict: key=resnr : val=atomnr
+        # sites C and D:
+        for k in resnr_inter:
+            atomnr += 1
+            for line in mono_pdb:
+                if line[1] == 'BB' and line[3] == k:
+                    resname = line[2]
+                    x = line[4]
+                    y = line[5]
+                    z = line[6]
+                    ch_id = line[7]
+                    upd_out_pdb.append([atomnr, 'VWC', resname, k, x, y, z, ch_id])
+                    virtual_sites.append([atomnr, line[0]])
+                    vwc_excl.append([k, atomnr])  # dict: key=resnr : val=atomnr
+        for k in resnr_inter:
+            atomnr += 1
+            for line in mono_pdb:
+                if line[1] == 'BB' and line[3] == k:
+                    resname = line[2]
+                    x = line[4]
+                    y = line[5]
+                    z = line[6]
+                    ch_id = line[7]
+                    upd_out_pdb.append([atomnr, 'VWD', resname, k, x, y, z, ch_id])
+                    virtual_sites.append([atomnr, line[0]])
+                    vwd_excl.append([k, atomnr])  # dict: key=resnr : val=atomnr
+    else:
+        for k in resnr_intra:
+            atomnr += 1
+            for line in out_pdb:
+                if line[1] == 'BB' and line[3] == k:
+                    resname = line[2]
+                    x = line[4]
+                    y = line[5]
+                    z = line[6]
+                    ch_id = line[7]
+                    upd_out_pdb.append([atomnr, 'VWA', resname, k, x, y, z, ch_id])
+                    virtual_sites.append([atomnr, line[0]])
+        # repeat for sites B:
+        for k in resnr_intra:
+            atomnr += 1
+            for line in out_pdb:
+                if line[1] == 'BB' and line[3] == k:
+                    resname = line[2]
+                    x = line[4]
+                    y = line[5]
+                    z = line[6]
+                    ch_id = line[7]
+                    upd_out_pdb.append([atomnr, 'VWB', resname, k, x, y, z, ch_id])
+                    virtual_sites.append([atomnr, line[0]])
+                    vwb_excl.append([k, atomnr]) # dict: key=resnr : val=atomnr
+        # sites C and D:
+        for k in resnr_inter:
+            atomnr += 1
+            for line in out_pdb:
+                if line[1] == 'BB' and line[3] == k:
+                    resname = line[2]
+                    x = line[4]
+                    y = line[5]
+                    z = line[6]
+                    ch_id = line[7]
+                    upd_out_pdb.append([atomnr, 'VWC', resname, k, x, y, z, ch_id])
+                    virtual_sites.append([atomnr, line[0]])
+                    vwc_excl.append([k, atomnr])  # dict: key=resnr : val=atomnr
+        for k in resnr_inter:
+            atomnr += 1
+            for line in out_pdb:
+                if line[1] == 'BB' and line[3] == k:
+                    resname = line[2]
+                    x = line[4]
+                    y = line[5]
+                    z = line[6]
+                    ch_id = line[7]
+                    upd_out_pdb.append([atomnr, 'VWD', resname, k, x, y, z, ch_id])
+                    virtual_sites.append([atomnr, line[0]])
+                    vwd_excl.append([k, atomnr])  # dict: key=resnr : val=atomnr
+        reset_res_ndx_chain = 0 # in non-mono case, this variable won't be used
 
     # write an updated pdb file:
     if mod_enabled:
@@ -827,205 +860,163 @@ def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,  
             s2print = ' %d  %d  1  %.3f  1250\n' % (excl_c[ind][0], excl_c[ind][1], sym_pairs_inter[ind][6])
             f.write(s2print)
 
-
-def write_main_top_files(file_pref, molecule_itp, fnames, mod_chain_at_nums, reset_res_ndx_chain):
+def write_main_top(file_pref, molecule_itp, fnames, selected_chain, mod_chain_at_nums):
     """
-    modifies the .top and .itp written by martinize2 (w/o -go-vs flag), inserts "#include" lines
+    writes the main .itp file and .top file
     """
-    itp_file = [ ]
-    itp_sections.count = 0
-    itp_go_sections = ['[ virtual_sitesn ]\n', '[ exclusions ]\n']  # sections requiring modification by Go
-    # [ atoms ] section can't be missing; check only for the other two
-    input_itp_headers = [ ]
-    with open(molecule_itp, 'r') as f:
-        for key, section in itertools.groupby(f, itp_sections):
-            # print(list(section))
-            itp_file.append(list(section))
-    # get headers from the input itp:
-    for sect in itp_file:
-        if sect[0].startswith('[ '):
-            # print(elm[0])
-            input_itp_headers.append(sect[0])
-    # find missing headers:
-    missing_headers = list(set(itp_go_sections) - set(input_itp_headers))
-    # write out the (modified) itp file
-    # todo: must take the correct section and correct numbering!
-    with open(file_pref + '_' + fnames[6], 'w') as f:
-        for section in itp_file:
-            if 'moleculetype' in section[0]:  # rewrite this section entirely with the right molecule name
-                f.write(section[0])
-                f.write(file_pref + '    1\n\n')
-            elif 'atoms' in section[0]:  # how to filter for sections that will be expanded
-                if mod_enabled:  # only write the first N lines of section (N=atoms in 1st chain)
-                    #todo write the correct section with reset numbering
-                    #for ndx in range(single_chain_mods[0]+1):
-                    #    f.write(section[ndx])
-                    atomind = 1 # atom index is a simple counter
-                    resind = 0  # index for residue list to insert correct residue numbers
-                    for ndx, line in enumerate(section):
-                        if '[ atoms ]' in line:
-                            f.write(line)
-                        line = line.split()
-                        # if the atom is withing the atom index range of the chosen chain
-                        if len(line) == 7 and (mod_chain_at_nums[0] <= int(line[0]) <= mod_chain_at_nums[1]):
-                            # todo: change line[2] to correct residue numbering!
-                            s2print = '%5d %-4s %4s %3s %-3s %-5d %4s\n' % (atomind, line[1], reset_res_ndx_chain[resind], line[3],
-                                                                           line[4], atomind, line[6])
-                            #s2print = '%3d %s_%s%-3d %6d %3s %-3s %-5d 0.0\n'
-                            f.write(s2print)
-                            atomind += 1
-                            resind += 1
-                    #todo end of this to-change part
-                else:            # otherwise, write the entire section as in the input itp
-                    for line in section:
-                        f.write(line)
-                # add the "include" line with the VS list:
-                f.write('#include "' + file_pref + '_' + fnames[2] + '"\n\n')
-            elif 'virtual_sitesn' in section[0]:  # check if the input itp already contains the VS section
-                if mod_enabled:  # only write lines with indices from 1st chain
-                    for line in section:
-                        if not (line.startswith('[') or line.startswith(';') or line.startswith('\n') or line.startswith('#')):
-                            line = line.split()
-                            line = [ int(ndx) for ndx in line]  # turn each element in list line into int
-                            # unless any of the ints > N atoms in one chain (line[1] is func=2, safe to assume is true):
-                            if not any(ndx > single_chain_mods[0] for ndx in line):
-                                # number of indices on each may vary, use simpler formatting:
-                                line = [str(ndx) for ndx in line]  # turn them back into strings...
-                                f.write('  '.join(line) + '\n')     # ...and write to file
+    # read and store sections of input itp file:
+    # dictionary of sections, with a value = columns to modify via modulo operation
+    itp_section_list_dict = {'atoms': (0, 2, 5), 'position_restraints': 0,
+                             'bonds': (0, 1), 'constraints': (0, 1),
+                             'angles': (0, 1, 2), 'dihedrals': (0, 1, 2, 3), 'exclusions': 0}
+    # todo: if 'dihedrals' comes up twice (improper dihedrals) ?
 
+    all_itp_sections = [] # will contain a list of lists with headless section contents
+    for section in itp_section_list_dict: # section = dict key only
+        # print(itp_section_list_dict[section]) # get value by key
+        with open(molecule_itp, 'r') as file:
+            temp_section = []  # 2d list to store the current section in
+            match = False
+            for line in file:
+                # if line contains key value, save from next line:
+                if line.startswith('[') and section in line:
+                    match = True
+                    continue
+                # if line contains '[' again, stop before that, don't write that line
+                elif line.startswith('[') and section not in line:
+                    match = False
+                    continue
+                # ignore empty lines:
+                elif line.startswith('\n'):
+                    continue
+                elif match:
+                    if line.startswith(('#', ';')):
+                        temp_section.append(line)
+                    else:  # process the actual data
+                        line = line.split(';') # get rid of all in-line comments for consistend column numbers
+                        line = line[0].split()
+                        if section == 'atoms':
+                            # atoms section: check if atomic index is in the atomistic range
+                            if mod_chain_at_nums[0] <= int(line[0]) <= mod_chain_at_nums[1]:
+                                line[0] = int(line[0]) % single_chain_mods[0]  # atomnr
+                                line[5] = line[0]  # "charge group" in col. 6 (CG: per bead)
+                                if line[0] == 0:
+                                    line[0] = single_chain_mods[0]
+                                    line[5] = line[0]
+                                line[2] = int(line[2]) % single_chain_mods[1]  # resnr
+                                if line[2] == 0:
+                                    line[2] = single_chain_mods[1]
+                                temp_section.append(line)
+                        elif section == 'position_restraints':
+                            # posres section: check if atom is in the selected chain
+                            if mod_chain_at_nums[0] <= int(line[0]) <= mod_chain_at_nums[1]:
+                                line[0] = int(line[0]) % single_chain_mods[0]  # atomnr
+                                if line[0] == 0:
+                                    line[0] = single_chain_mods[0]
+                                temp_section.append(line)
+                        elif section == 'exclusions':
+                            # all indices have to be checked and converted
+                            if all(mod_chain_at_nums[0] <= int(i) <= mod_chain_at_nums[1] for i in line):
+                                for i in range(len(line)):
+                                    line[i] = int(line[i]) % single_chain_mods[0]  # i-th atomnr
+                                    if line[i] == 0:
+                                        line[i] = single_chain_mods[0]
+                                temp_section.append(line)
+                        # sections: bonds, constraints, angles, dihedrals
                         else:
-                            f.write(line)
-                else:            # if mod_enabled=False, write all lines of the section as in the input itp
-                    for line in section:
-                        f.write(line)
-                f.write('#include "' + file_pref + '_' + fnames[3] + '"\n\n')  # [ virtual_sitesn ]
-            elif 'exclusions' in section[0]:
-                if mod_enabled:
-                    for line in section:
-                        if not (line.startswith('[') or line.startswith(';') or line.startswith('\n') or line.startswith('#')):
-                            line = line.split()
-                            line = [ int(ndx) for ndx in line]  # turn each element in list line into int
-                            # unless any of the ints > N atoms in one chain:
-                            if not any(ndx > single_chain_mods[0] for ndx in line):
-                                # number of indices on each line varies, use simpler formatting:
-                                line = [str(ndx) for ndx in line]  # turn them back into strings...
-                                f.write('  '.join(line) + '\n')    # ...and write to file
-                        else:
-                            f.write(line)
-                else:
-                    for line in section:
-                        f.write(line)
-                f.write('#include "' + file_pref + '_' + fnames[4] + '"\n\n')
-            # now for the sections that only need to be shortened for the single-chain output:
-            elif mod_enabled and 'position_restraints' in section[0]:
-                for line in section:
-                    if not (line.startswith('[') or line.startswith(';') or line.startswith('\n') or line.startswith('#')):
-                        line = line.split()
-                        # posres: 0=index, 1=functype (1), 2,3,4= x,y,z constants
-                        line = [ int(ndx) for ndx in line]
-                        if not line[0] > single_chain_mods[0]:
-                            s2print = '%d  %d  %d  %d  %d\n' % (line[0], line[1], line[2], line[3], line[4])
-                            f.write(s2print)
-                    else:
-                        f.write(line)
-            elif mod_enabled and 'bonds' in section[0]:
-                for line in section:
-                    if not (line.startswith('[') or line.startswith(';') or line.startswith('\n') or line.startswith('#')):
-                        line = line.split()
-                        # bonds: 0,1=indices, 2=functype (1), 3,4=bond, const
-                        line = [int(line[0]), int(line[1]), int(line[2]), float(line[3]), int(line[4])]
-                        if not (line[0] > single_chain_mods[0] or line[1] > single_chain_mods[0]):
-                            s2print = '%d  %d  %d  %.3f %d\n' % (line[0], line[1], line[2], line[3], line[4])
-                            f.write(s2print)
-                    else:
-                        f.write(line)
-            elif mod_enabled and 'constraints' in section[0]:
-                for line in section:
-                    if not (line.startswith('[') or line.startswith(';') or line.startswith('\n') or line.startswith('#')):
-                        line = line.split()
-                        # constraints: 0,1=indices, 2=functype (1), 3=dist
-                        line = [int(line[0]), int(line[1]), int(line[2]), float(line[3])]
-                        if not (line[0] > single_chain_mods[0] or line[1] > single_chain_mods[0]):
-                            s2print = '%d  %d  %d  %.3f\n' % (line[0], line[1], line[2], line[3])
-                            f.write(s2print)
-                    else:
-                        f.write(line)
-            elif mod_enabled and 'angles' in section[0]:
-                for line in section:
-                    if not (line.startswith('[') or line.startswith(';') or line.startswith('\n') or line.startswith('#')):
-                        if any(x == ';' for x in line):
-                            line = line.split(';')
-                            line = line[0].split()  # now the output won't include in-line comments
-                        else:
-                            line = line.split()
-                        # angles: 0-2=indices, 3=functype (2:G96, 10: restricted bending), 4,5 = angle, const
-                        line = [int(line[0]), int(line[1]), int(line[2]), int(line[3]), float(line[4]), float(line[5])]
-                        if not (line[0] > single_chain_mods[0] or line[1] > single_chain_mods[0]
-                                or line[2] > single_chain_mods[0]):
-                            s2print = '%d  %d  %d  %d  %.2f  %.1f\n' % (line[0], line[1], line[2], line[3], line[4], line[5])
-                            f.write(s2print)
-                    else:
-                        f.write(line)
-            elif mod_enabled and 'dihedrals' in section[0]:  # both proper and improper dihedrals are processed here
-                for line in section:
-                    if not (line.startswith('[') or line.startswith(';') or line.startswith('\n') or line.startswith('#')):
-                        # if line contains a comment: remove comment
-                        if any(x == ';' for x in line):
-                            line = line.split(';')
-                            line = line[0].split()
-                        else:
-                            line = line.split()
-                        # proper dihedrals: 0-3=indices, 4=functype (1), 5,6,7 = angle, const, multiplicity
-                        # improper dihedrals: 0-3=indices, 4=functype (2), 5,6 = angle, const
-                        if line[4] == '1':  # proper dihedral
-                            line = [int(line[0]), int(line[1]), int(line[2]), int(line[3]), int(line[4]),
-                                    float(line[5]), float(line[6]), int(line[7])]
-                            # filter indices for the first chain only:
-                            if not (line[0] > single_chain_mods[0] or line[1] > single_chain_mods[0]
-                                    or line[2] > single_chain_mods[0] or line[3] > single_chain_mods[0]):
-                                # omit "pretty" formatting to allow more flexibility
-                                s2print = '%d  %d  %d  %d  %d  %.2f  %.2f  %d\n' % (
-                                    line[0], line[1], line[2], line[3], line[4], line[5], line[6], line[7]
-                                )
-                                f.write(s2print)
-                        elif line[4] == '2':  # improper dihedral
-                            line = [int(line[0]), int(line[1]), int(line[2]), int(line[3]), int(line[4]),
-                                    float(line[5]), float(line[6])]
-                            # filter indices for the first chain only:
-                            if not (line[0] > single_chain_mods[0] or line[1] > single_chain_mods[0]
-                                    or line[2] > single_chain_mods[0] or line[3] > single_chain_mods[0]):
-                                s2print = '%d  %d  %d  %d  %d  %.2f  %.2f\n' % (
-                                    line[0], line[1], line[2], line[3], line[4], line[5], line[6]
-                                )
-                                f.write(s2print)
-                        else:
-                            continue  # something went wrong with formatting, skip this line
+                            # list of columns containing values to modulo:
+                            line_atoms = [line[i] for i in itp_section_list_dict[section]]
+                            # check if all selected atoms simultaneously fall into the range (if and and and)
+                            if all(mod_chain_at_nums[0] <= int(i) <= mod_chain_at_nums[1] for i in line_atoms):
+                                # apply modulo operation to all atoms selected by dictionary:
+                                for i in itp_section_list_dict[section]:
+                                    line[i] = int(line[i]) % single_chain_mods[0]  # i-th atomnr
+                                    if line[i] == 0:
+                                        line[i] = single_chain_mods[0]
+                                temp_section.append(line)
+        all_itp_sections.append(temp_section)
 
-                    else:
-                        f.write(line)
-            else:  # catch-all for the rest of the text in itp
-                for line in section:
-                    f.write(line)
-    # if there are missing sections, include them at the end:
-        if missing_headers:
-            if 'virtual_sitesn' in missing_headers[0]:
-                f.write('\n' + missing_headers[0])
-                f.write('#include "' + file_pref + '_' + fnames[3] + '"\n')
-                missing_headers.pop(0)
-            elif 'exclusions' in missing_headers[0]:
-                f.write('\n' + missing_headers[0])
-                f.write('#include "' + file_pref + '_' + fnames[4] + '"\n')
-                missing_headers.pop(0)
-            # check if anything left in missing_headers:
-            if missing_headers: # if yes, then it must be excusions
-                f.write('\n' + missing_headers[0])
-                f.write('#include "' + file_pref + '_' + fnames[4] + '"\n')
+    # write modified itp file
+    with open(file_pref + '_' + selected_chain + '_' + fnames[6], 'w') as file:
+        # [ moleculetype ]
+        file.write('[ moleculetype ]\n' + file_pref + '    1\n\n')
 
-    # write updated .top file from scratch:
+        # [ atoms ]
+        file.write('[ atoms ]\n')
+        for line in all_itp_sections[0]:
+            s2print = '%5d %-4s %4d %3s %-3s %-5d %4s\n' % (line[0], line[1], line[2], line[3],
+                                                            line[4], line[5], line[6])
+            file.write(s2print)
+        file.write('#include "' + file_pref + '_' + fnames[2] + '"\n\n')
+
+        # [ position_restraints ]
+        file.write('[ position_restraints ]\n')
+        for line in all_itp_sections[1]:
+            if len(line) == 5:
+                s2print = '%4d %2s  %s  %s  %s\n' % (line[0], line[1], line[2], line[3], line[4])
+                file.write(s2print)
+            else:
+                file.write(line)
+        file.write('\n')
+
+        # [ bonds ]
+        file.write('[ bonds ]\n')
+        for line in all_itp_sections[2]:
+            if len(line) == 5:
+                s2print = '%4d %4d %2s  %s %s\n' % (line[0], line[1], line[2], line[3], line[4])
+                file.write(s2print)
+            else:
+                file.write(line)
+        file.write('\n')
+
+        # [ constraints ]
+        file.write('[ constraints ]\n')
+        for line in all_itp_sections[3]:
+            if len(line) == 4:
+                s2print = '%4d %4d  %s  %s\n' % (line[0], line[1], line[2], line[3])
+                file.write(s2print)
+            else:
+                file.write(line)
+        file.write('\n')
+
+        # [ angles ]
+        file.write('[ angles ]\n')
+        for line in all_itp_sections[4]:
+            if len(line) == 6:
+                s2print = '%4d %4d %4d %2s %3s %s\n' % (line[0], line[1], line[2], line[3], line[4], line[5])
+                file.write(s2print)
+            else:
+                file.write(line)
+        file.write('\n')
+
+        # [ dihedrals ]
+        file.write('[ dihedrals ]\n')
+        for line in all_itp_sections[5]:
+            if len(line) == 8:
+                s2print = '%4d %4d %4d %4d %s %6s %3s %s\n' % (line[0], line[1], line[2], line[3], line[4],
+                                                               line[5], line[6], line[7])
+                file.write(s2print)
+            else:
+                file.write(line)
+        file.write('\n')
+
+        # [ exclusions ]
+        file.write('[ exclusions ]\n')
+        for line in all_itp_sections[6]:
+            # all indices, each line of variable length: convert list of integers to a single string
+            s2print = '  '.join(str(ind) for ind in line) + '\n'
+            file.write(s2print)
+        file.write('#include "' + file_pref + '_' + fnames[4] + '"\n\n')
+
+        # last (from scratch) section:
+        file.write('[ virtual_sitesn ]\n' + '#include "' + file_pref + '_' + fnames[3] + '"\n')
+
+
+    # top file from scratch:
     with open(file_pref+ '_' + fnames[7], 'w') as f:
         f.write('#define GO_VIRT\n')
         f.write('#include "martini_v3.0.0_go.itp"\n')
-        f.write('#include "' + file_pref + '_' + fnames[6] + '"\n\n')
+        f.write('#include "' + file_pref + '_' + selected_chain + '_' + fnames[6] + '"\n\n')
         f.write('[ system ]\n'+ file_pref + ' complex with Go bonds\n\n')
         f.write('[ molecules ]\n' + file_pref + '     1 \n') # check if 1 can be a variable
 
@@ -1060,4 +1051,4 @@ excl_b, excl_c, excl_d, intra_pairs, inter_pairs = get_exclusions(vwb_excl, vwc_
 write_include_files(args.moltype, args.missres, args.go_eps_intra,
                     args.go_eps_inter, c6c12, sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs,
                     inter_pairs, virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d, eps_intra_custom, eps_inter_custom)
-write_main_top_files(args.moltype, args.i, fnames, mod_chain_at_nums, reset_res_ndx_chain)
+write_main_top(args.moltype, args.i, fnames, args.chain_id, mod_chain_at_nums)

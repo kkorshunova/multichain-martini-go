@@ -1,12 +1,12 @@
-# [temp name]: sorted_goVirt
+# "Snake Oil"
 ## Description:
-This script is the generalization of the Martini-Go scheme (originally developed by Poma et al., 2017) for multichain CG protein complexes.
+This script is a variation of the Martini-Go scheme (originally developed by Poma et al., 2017) for multichain CG protein homopolymers.
 
-UPDATED (230919) features include:
+Features include:
  - *inter*molecular and *intra*molecular Go-bonds are clearly distinguished, with two separate $\varepsilon$-values defined by the user
  - separation of Go-bonds is realized via the combination of multiple virtual site (VS) and exclusion groups
  - flexible chain identification procedure
- - NEW: single chain output for homopolymers (make sure to use `modulo-ft` branch)
+ - single chain output for homopolymers
 
 ## Repository content:
 - `sorted_goVirt.py`: the script
@@ -16,26 +16,13 @@ UPDATED (230919) features include:
 
 ## How it works:
 - the script requires no installation: simply change file permissions to make it executable (e.g.: `chmod u+x`)
-- required Python packages:
-  - argparse
+- required additional Python packages:
   - numpy
-  - math
-  - re
   - pandas
-  - itertools
-- CURRENT example commands:
+- Example commands:
   - chain identification from the provided .pdb file (`--chain_sort 1`):
   ```commandline
-  python3 ./sorted_goVirt.py -s 2beg_m1_cg.pdb -i molecule_0.itp -f 2beg_m1_clean_renumbered.map --nb martini_v3.0.0_go.itp --moltype 2beg --go_eps_inter 6.0 --go_eps_intra 12.0 --chain_sort 1 --bb_cutoff 10
-  ```
-- OLD version examples:
-  - Distance-based chain identification:
-  ```commandline
-  python3 ./sorted_goVirt.py -s mol_cg.pdb -i mol_cg.itp -f mol.map --nb martini_v3.0.0_go.itp --moltype mol --go_eps_inter 6.0 --go_eps_intra 12.0 --chain_sort 0 --bb_cutoff 10
-  ```
-  - User-defined chain identification:
-  ```commandline
-  python3 ./sorted_goVirt.py -s mol_cg.pdb -i mol_cg.itp -f mol.map --nb martini_v3.0.0_go.itp --moltype mol --go_eps_inter 6.0 --go_eps_intra 12.0 --chain_sort 2 --chain_file mol_chain_ids.txt
+  python3 ./sorted_goVirt.py -s 2beg_m1_cg.pdb -i molecule_0.itp -f 2beg_m1_clean_renumbered.map --nb martini_v3.0.0_go.itp --moltype 2beg --go_eps_inter 6.0 --go_eps_intra 12.0 --chain_sort 1 --bb_cutoff 10 --chain_id B
   ```
 
 ### Input files:
@@ -53,14 +40,13 @@ UPDATED (230919) features include:
 - (Opt.) `--bb_cutoff` maximal distance (in A) allowed between next-neighbor backbone CG particles (default: 10 A), used with  `--chain_sort 0`
 - (\*Opt.) `--cutoff_short`, `--cutoff_long` lower and upper cutoff distances [nm], only contacts within the cutoff limits are included in the Go interactions (current defaults: 0.3 and 1.1)
 - (\*Opt.) `--missres` number of missing residues at the beginning of the atomistic pdb structure (legacy variable, default: 0)
+- `--chain_id B` select the output chain for which the contacts will be analyzed
 
 ### Output files:
 Prefix is defined via `--moltype` flag (`mol` by default)
 - prefix + `_go_mono.top`: main system topology file 
 - prefix + `_go_mono.itp`: main include topology file
 - prefix + itp section name + `_go_mono.itp`: all auxiliary itp file names
-
-(to be updated) For the organization of the output files, refer to this [flowchart](https://github.com/kkorshunova/multichain-martini-go/blob/master/docs/MGo_top_A1.pdf).
 
 ### How to choose a suitable chain sorting method:
 Identification of separate chains in the input protein structure can be done in three ways:

@@ -5,7 +5,6 @@ import numpy as np
 import math
 import re
 import pandas as pd  # needed for get_bb_pair_sigma_epsilon()
-import itertools  # needed for write_main_top()
 
 # global variables:
 seqDist = 4  # minimal distance in the sequence to add a elastic bond (ElNedyn=3 [Perriole2009]; Go=4 [Poma2017])

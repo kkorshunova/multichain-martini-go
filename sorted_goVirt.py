@@ -989,12 +989,26 @@ def write_main_top(file_pref, molecule_itp, fnames, selected_chain, mod_chain_at
         file.write('\n')
 
         # [ dihedrals ]
+        # Both proper and improper dihedrals are combined under a single
+        # `[ dihedrals ]` header. Martinize sometimes creates two separate
+        #  entries, but merging them does not alter the behavior of the 
+        #  itp for GMX.
         file.write('[ dihedrals ]\n')
         for line in all_itp_sections[5]:
-            if len(line) == 8:
+            # Write comments without processing.
+            if line[0] == ';':
+                file.write(line)
+            # Catch the proper dihedrals.
+            elif len(line) == 8:
                 s2print = '%4d %4d %4d %4d %s %6s %3s %s\n' % (line[0], line[1], line[2], line[3], line[4],
                                                                line[5], line[6], line[7])
                 file.write(s2print)
+            # Catch the improper dihedrals.
+            elif len(line) == 7:
+                s2print = '%4d %4d %4d %4d %s %6s %3s\n' % (line[0], line[1], line[2], line[3], line[4],
+                                                               line[5], line[6])
+                file.write(s2print)
+            # A fallback where the line gets printed as is (just like comments).
             else:
                 file.write(line)
         file.write('\n')

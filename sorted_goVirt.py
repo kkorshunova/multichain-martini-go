@@ -867,8 +867,8 @@ def write_main_top(file_pref, molecule_itp, fnames, selected_chain, mod_chain_at
     # dictionary of sections, with a value = columns to modify via modulo operation
     itp_section_list_dict = {'atoms': (0, 2, 5), 'position_restraints': 0,
                              'bonds': (0, 1), 'constraints': (0, 1),
-                             'angles': (0, 1, 2), 'dihedrals': (0, 1, 2, 3), 'exclusions': 0}
-    # todo: if 'dihedrals' comes up twice (improper dihedrals) ?
+                             'angles': (0, 1, 2), 'dihedrals': (0, 1, 2, 3),
+                             'exclusions': 0, 'virtual_sitesn': 0}
 
     all_itp_sections = [] # will contain a list of lists with headless section contents
     for section in itp_section_list_dict: # section = dict key only
@@ -892,7 +892,7 @@ def write_main_top(file_pref, molecule_itp, fnames, selected_chain, mod_chain_at
                     if line.startswith(('#', ';')):
                         temp_section.append(line)
                     else:  # process the actual data
-                        line = line.split(';') # get rid of all in-line comments for consistend column numbers
+                        line = line.split(';') # get rid of all in-line comments for consistent column numbers
                         line = line[0].split()
                         if section == 'atoms':
                             # atoms section: check if atomic index is in the atomistic range
@@ -921,7 +921,20 @@ def write_main_top(file_pref, molecule_itp, fnames, selected_chain, mod_chain_at
                                     if line[i] == 0:
                                         line[i] = single_chain_mods[0]
                                 temp_section.append(line)
-                        # sections: bonds, constraints, angles, dihedrals
+                        elif section == 'virtual_sitesn':
+                            # separate indices (1st and 3rd-nth columns) and func type (always 2nd column)
+                            func_type = line.pop(1)
+                            # check and convert all indices
+                            if all(mod_chain_at_nums[0] <= int(i) <= mod_chain_at_nums[1] for i in line):
+                                for i in range(len(line)):
+                                    line[i] = int(line[i]) % single_chain_mods[0]  # i-th atomnr
+                                    if line[i] == 0:
+                                        line[i] = single_chain_mods[0]
+                                # join indices (line list) and func_type back together in correct order:
+                                line.insert(1, func_type)
+                                # append as usual
+                                temp_section.append(line)
+                        # other sections: bonds, constraints, angles, dihedrals
                         else:
                             # list of columns containing values to modulo:
                             line_atoms = [line[i] for i in itp_section_list_dict[section]]
@@ -989,11 +1002,18 @@ def write_main_top(file_pref, molecule_itp, fnames, selected_chain, mod_chain_at
         file.write('\n')
 
         # [ dihedrals ]
+        # both regular (func type 1) and improper (func type 2) dihedrals are in the same section
         file.write('[ dihedrals ]\n')
         for line in all_itp_sections[5]:
+            # proper dihedrals
             if len(line) == 8:
                 s2print = '%4d %4d %4d %4d %s %6s %3s %s\n' % (line[0], line[1], line[2], line[3], line[4],
                                                                line[5], line[6], line[7])
+                file.write(s2print)
+            # improper dihedrals:
+            elif len(line) == 7:
+                s2print = '%4d %4d %4d %4d %s %6s %3s\n' % (line[0], line[1], line[2], line[3], line[4],
+                                                               line[5], line[6])
                 file.write(s2print)
             else:
                 file.write(line)
@@ -1007,8 +1027,14 @@ def write_main_top(file_pref, molecule_itp, fnames, selected_chain, mod_chain_at
             file.write(s2print)
         file.write('#include "' + file_pref + '_' + fnames[4] + '"\n\n')
 
-        # last (from scratch) section:
-        file.write('[ virtual_sitesn ]\n' + '#include "' + file_pref + '_' + fnames[3] + '"\n')
+        # last section:
+        #file.write('[ virtual_sitesn ]\n' + '#include "' + file_pref + '_' + fnames[3] + '"\n')
+        file.write('[ virtual_sitesn ]\n')
+        for line in all_itp_sections[7]:
+            # all indices, convert list of integers to a single string
+            s2print = '  '.join(str(ind) for ind in line) + '\n'
+            file.write(s2print)
+        file.write('#include "' + file_pref + '_' + fnames[3] + '"\n\n')
 
 
     # top file from scratch:

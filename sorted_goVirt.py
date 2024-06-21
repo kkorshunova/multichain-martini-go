@@ -553,7 +553,7 @@ def update_pdb(file_pref, out_pdb, resnr_intra, resnr_inter, selected_chain):
         pdb_name = '_cg_go_mono.pdb'
     else:
         pdb_name = '_cg_go.pdb'
-    with open(file_pref + pdb_name, 'w') as f:
+    with open(file_pref + '_' + selected_chain + pdb_name, 'w') as f:
         for line in upd_out_pdb:
             s2print = "ATOM  %5d %-4s %3s  %4d    %8.3f%8.3f%8.3f  1.00  0.00\n" % (line[0], line[1], line[2], line[3],
                                                                         line[4], line[5], line[6])
@@ -707,13 +707,13 @@ def get_bb_pair_sigma_epsilon(itp_filename, martini_file, sym_pairs_inter):
 ########## FILE WRITING PROCEDURES ##########
 def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,     #todo: either remove go_eps_intra, go_eps_inter or eps_intra_custom, eps_inter_custom
                 sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs, inter_pairs,
-                        virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d, eps_intra_custom, eps_inter_custom):
+                        virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d, eps_intra_custom, eps_inter_custom, selected_chain):
     """
     writes all included .itp files
     """
     # main.top -> martini_v3.0.0_go.itp [ atomtypes ]-> atomtypes_go.itp -> (file_pref)_atomtypes_go.itp
     # here: sets of (file_pref)_[A-D] VSites
-    with open(file_pref + '_' + fnames[0], 'w') as f:
+    with open(file_pref + '_' + selected_chain + '_' + fnames[0], 'w') as f:
         f.write('; protein BB virtual particles \n')
         f.write('; INTRA particles\n')
         for k in resnr_intra:
@@ -735,11 +735,11 @@ def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,  
             f.write(s2print)
     # add the name of the created .itp file into the wrapper atomtypes_go.itp
     with open('atomtypes_go.itp', 'w') as f:  # this filename doesn't change, unless it changes in martini_v3.0.0_go.itp
-        s2print = '#include "%s_%s"\n' % (file_pref, fnames[0])
+        s2print = '#include "%s_%s_%s"\n' % (file_pref, selected_chain, fnames[0])
         f.write(s2print)
 
     # main.top -> martini_v3.0.0_go.itp [ nonbond_params ]-> nonbond_params_go.itp -> (file_pref)_nonbond_params_go.itp
-    with open(file_pref + '_' + fnames[1], 'w') as f:
+    with open(file_pref + '_' + selected_chain + '_' + fnames[1], 'w') as f:
         f.write('; OV + symmetric rCSU contacts \n')
         if (c6c12 == 1):  # this setting uses sigma/eps computed using Vii, Wii
             f.write('; not implemented yet\n')
@@ -795,11 +795,11 @@ def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,  
                 f.write(s2print)
     # add the name of the created .itp file into the wrapper go-table_VirtGoSites.itp
     with open('nonbond_params_go.itp','w') as f:  # this filename doesn't change, unless it changes in martini_v3.0.0_go.itp
-        s2print = '#include "%s_%s"\n' % (file_pref, fnames[1])
+        s2print = '#include "%s_%s_%s"\n' % (file_pref, selected_chain, fnames[1])
         f.write(s2print)
 
     # main.top -> (file_pref)_go.itp [ atoms ] -> (file_pref)_atoms_go.itp
-    with open(file_pref + '_' + fnames[2], 'w') as f:
+    with open(file_pref + '_' + selected_chain + '_' + fnames[2], 'w') as f:
         f.write('; virtual sites\n')
         for entry in upd_out_pdb:
             if entry[1] == 'VWA':
@@ -818,7 +818,7 @@ def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,  
             f.write(s2print)
 
     # main.top -> molecule.itp [ virtual_sitesn ] -> (file_pref)_virtual_sitesn_go.itp
-    with open(file_pref + '_' + fnames[3], 'w') as f:
+    with open(file_pref + '_' + selected_chain + '_' + fnames[3], 'w') as f:
         f.write('; VS index - funct - constructing atom index/indices\n')
         for pair in virtual_sites:
             s2print = '%4d 1 %3d\n' % (pair[0], pair[1])
@@ -826,7 +826,7 @@ def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,  
 
     # main.top -> molecule.itp [ exclusions ] -> (file_pref)_exclusions_go.itp
     # exclusion pairs sorted by intra-inter:
-    with open(file_pref + '_' + fnames[4], 'w') as f:
+    with open(file_pref + '_' + selected_chain + '_' + fnames[4], 'w') as f:
         f.write('; [ exclusions for intra BB sites ]\n')
         f.write('; atomnr atomnr  -  resnr resnr\n')
         for line in sym_pairs_intra:
@@ -849,7 +849,7 @@ def write_include_files(file_pref, missRes, go_eps_intra, go_eps_inter, c6c12,  
             f.write(s2print)
 
     # visualize the go-bonds: (file_pref)_viz_go.itp
-    with open(file_pref + '_' + fnames[5], 'w') as f:
+    with open(file_pref + '_' + selected_chain + '_' + fnames[5], 'w') as f:
         f.write('; Intra Go bonds as harmonic bonds (VWB)\n')
         for ind in range(len(sym_pairs_intra)):
             s2print = ' %d  %d  1  %.3f  1250\n' % (excl_b[ind][0], excl_b[ind][1], sym_pairs_intra[ind][6])
@@ -959,7 +959,7 @@ def write_main_top(file_pref, molecule_itp, fnames, selected_chain, mod_chain_at
             s2print = '%5d %-4s %4d %3s %-3s %-5d %4s\n' % (line[0], line[1], line[2], line[3],
                                                             line[4], line[5], line[6])
             file.write(s2print)
-        file.write('#include "' + file_pref + '_' + fnames[2] + '"\n\n')
+        file.write('#include "' + file_pref + '_' + selected_chain + '_' + fnames[2] + '"\n\n')
 
         # [ position_restraints ]
         file.write('[ position_restraints ]\n')
@@ -1025,7 +1025,7 @@ def write_main_top(file_pref, molecule_itp, fnames, selected_chain, mod_chain_at
             # all indices, each line of variable length: convert list of integers to a single string
             s2print = '  '.join(str(ind) for ind in line) + '\n'
             file.write(s2print)
-        file.write('#include "' + file_pref + '_' + fnames[4] + '"\n\n')
+        file.write('#include "' + file_pref + '_' + selected_chain + '_' + fnames[4] + '"\n\n')
 
         # last section:
         #file.write('[ virtual_sitesn ]\n' + '#include "' + file_pref + '_' + fnames[3] + '"\n')
@@ -1034,11 +1034,11 @@ def write_main_top(file_pref, molecule_itp, fnames, selected_chain, mod_chain_at
             # all indices, convert list of integers to a single string
             s2print = '  '.join(str(ind) for ind in line) + '\n'
             file.write(s2print)
-        file.write('#include "' + file_pref + '_' + fnames[3] + '"\n\n')
+        file.write('#include "' + file_pref + '_' + selected_chain + '_' + fnames[3] + '"\n\n')
 
 
     # top file from scratch:
-    with open(file_pref+ '_' + fnames[7], 'w') as f:
+    with open(file_pref + '_' + selected_chain + '_' + fnames[7], 'w') as f:
         f.write('#define GO_VIRT\n')
         f.write('#include "martini_v3.0.0_go.itp"\n')
         f.write('#include "' + file_pref + '_' + selected_chain + '_' + fnames[6] + '"\n\n')
@@ -1075,5 +1075,6 @@ excl_b, excl_c, excl_d, intra_pairs, inter_pairs = get_exclusions(vwb_excl, vwc_
 # write the updated itp/top files:
 write_include_files(args.moltype, args.missres, args.go_eps_intra,
                     args.go_eps_inter, c6c12, sym_pairs_intra, sym_pairs_inter, excl_b, excl_c, excl_d, intra_pairs,
-                    inter_pairs, virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d, eps_intra_custom, eps_inter_custom)
+                    inter_pairs, virtual_sites, upd_out_pdb, fnames, sigma_d, eps_d, eps_intra_custom, eps_inter_custom,
+                    args.chain_id)
 write_main_top(args.moltype, args.i, fnames, args.chain_id, mod_chain_at_nums)

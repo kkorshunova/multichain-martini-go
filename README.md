@@ -27,7 +27,10 @@ Features include:
 
 ### Input files:
 - `-s` structure pdb file (output of `martinize2` script):
-  - when running `martinize2`, do NOT use `-govs-include` and `-govs-moltype` flags
+  - when running `martinize2`, do NOT use `-govs-include` and `-govs-moltype` flags. Example `martinize2` command:
+  ```commandline
+  martinize2 -f 2beg_m1_clean_renumbered_conected.pdb -o 2beg_m1_cg.top -x 2beg_m1_cg.pdb -dssp /usr/bin/dssp -p backbone -ff martini3001 -merge A,B,C,D,E -scfix -cys auto
+  ```
   - maximal number of CG particles (ATOM records in the input pdb file): 99999
 - `-i` itp file (output of `martinize2` script), contains the structure's topology
 - `-f` contact map file: from [this server](http://info.ifpan.edu.pl/~rcsu/rcsu/index.html)
